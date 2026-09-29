@@ -67,7 +67,7 @@ def main():
         portal = importlib.import_module("portal")
         with portal.app.app_context():
             c = portal.db()
-            backup.restore_state(c, portal.CONF_DIR, state, confs)
+            backup.restore_state(c, portal.CONF_DIR, state, confs, portal.TRAFFIC_FILE)
             portal.write_peers(c)
         try:
             import pwd

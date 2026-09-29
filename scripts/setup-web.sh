@@ -29,10 +29,10 @@ DATA=/var/lib/vpn-portal
 [ -d "$CONFIGS_SRC" ] && ls "$CONFIGS_SRC"/client*.conf >/dev/null 2>&1 \
   || { echo "Использование: $0 /путь/к/clients   (в каталоге должны быть файлы client001.conf …)"; exit 1; }
 [ -f "$PORTAL_SRC" ] && [ -f "$PORTAL_DIR/backup.py" ] || { echo "Не найдены portal.py/backup.py в $PORTAL_DIR"; exit 1; }
-[ -f "$HERE/sync-peers.py" ] || { echo "Не найден sync-peers.py"; exit 1; }
+[ -f "$HERE/sync-peers.py" ] && [ -f "$HERE/collect-traffic.py" ] || { echo "Не найден sync-peers.py"; exit 1; }
 for f in nginx-http.conf nginx-https.conf nginx-proxy.inc vpn-portal.service \
          fail2ban/filter.d/vpn-portal-auth.conf fail2ban/jail.d/vpn-portal.local \
-         vpn-peer-sync.service vpn-peer-sync.path vpn-peer-sync.timer; do
+         vpn-peer-sync.service vpn-peer-sync.path vpn-peer-sync.timer vpn-traffic.service vpn-traffic.timer; do
   [ -f "$DEPLOY/$f" ] || { echo "Не найден шаблон $DEPLOY/$f"; exit 1; }
 done
 if [ -n "${SUPERADMIN_PASSWORD:-}" ] && [ "${#SUPERADMIN_PASSWORD}" -lt 8 ]; then echo "SUPERADMIN_PASSWORD: не короче 8 символов"; exit 1; fi
@@ -50,6 +50,7 @@ install -d -m 755 /opt/vpn-portal
 install -m 644 "$PORTAL_SRC" /opt/vpn-portal/portal.py
 install -m 644 "$PORTAL_DIR/backup.py" /opt/vpn-portal/backup.py
 install -m 755 "$HERE/sync-peers.py" /opt/vpn-portal/sync-peers.py
+install -m 755 "$HERE/collect-traffic.py" /opt/vpn-portal/collect-traffic.py
 install -m 755 "$HERE/restore-backup.py" /opt/vpn-portal/restore-backup.py
 install -d -o vpnportal -g vpnportal -m 700 "$DATA" "$DATA/configs"
 for f in "$CONFIGS_SRC"/client*.conf; do
@@ -73,13 +74,15 @@ chmod 600 "$ENV_FILE"
 install -m 644 "$DEPLOY/vpn-peer-sync.service" /etc/systemd/system/vpn-peer-sync.service
 install -m 644 "$DEPLOY/vpn-peer-sync.path" /etc/systemd/system/vpn-peer-sync.path
 install -m 644 "$DEPLOY/vpn-peer-sync.timer" /etc/systemd/system/vpn-peer-sync.timer
+install -m 644 "$DEPLOY/vpn-traffic.service" /etc/systemd/system/vpn-traffic.service
+install -m 644 "$DEPLOY/vpn-traffic.timer" /etc/systemd/system/vpn-traffic.timer
 
 # ---- сервис портала
 install -m 644 "$DEPLOY/vpn-portal.service" /etc/systemd/system/vpn-portal.service
 systemctl daemon-reload
 systemctl enable vpn-portal
 systemctl restart vpn-portal
-systemctl enable --now vpn-peer-sync.path vpn-peer-sync.timer
+systemctl enable --now vpn-peer-sync.path vpn-peer-sync.timer vpn-traffic.timer
 for _ in $(seq 1 20); do
   curl -fsS -o /dev/null http://127.0.0.1:8081/ 2>/dev/null && break
   sleep 0.5

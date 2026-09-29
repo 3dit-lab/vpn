@@ -353,6 +353,43 @@ def main():
     except ValueError:
         check("restore: несогласованность", True)
 
+    # ---------- трафик
+    with p.app.app_context():
+        owner_slots = sorted(r[0] for r in p.db().execute("SELECT a.slot FROM assignments a JOIN people pe ON pe.id=a.person_id JOIN orgs o ON o.id=pe.org_id WHERE o.slug='beta'"))
+    slot_a, slot_b = owner_slots[0], owner_slots[1]
+    pub_a, pub_b = p.peer_info(slot_a)["public"], p.peer_info(slot_b)["public"]
+    GB = 1024 ** 3
+    (d / "traffic.json").write_text(json.dumps({"version": 1, "peers": {
+        pub_a: {"rx": GB, "tx": 2 * GB, "lrx": 0, "ltx": 0}, pub_b: {"rx": 512 * 1024, "tx": 1024 * 1024, "lrx": 0, "ltx": 0}}}))
+    ob_ = x.client()
+    html = x.org_login(ob_, "beta", pw_b).get_data(as_text=True)
+    check("traffic: админ организации видит трафик пользователя", "3.0 ГБ" in html)
+    check("traffic: итог по организации Беты", "трафик всего" in html)
+    r = ob_.get("/org/export.csv").get_data(as_text=True)
+    check("traffic: CSV с байтами", str(3 * GB + 512 * 1024 + 1024 * 1024) in r)
+    html = sc.get("/super").get_data(as_text=True)
+    check("traffic: общий админ видит трафик организации", "ГБ" in html)
+    with p.app.app_context():
+        beta_tot = [o for o in p.org_rows() if o["slug"] == "beta"][0]["traffic"]
+    expected = 3 * GB + 512 * 1024 + 1024 * 1024
+    check("traffic: сумма по организации", beta_tot == expected, f"{beta_tot} != {expected}")
+    csv_super = sc.get("/super/export.csv").get_data(as_text=True)
+    check("traffic: CSV организаций содержит трафик", "Трафик" in csv_super)
+    # освобождение сохраняет накопленное в итоге человека
+    before = beta_tot
+    x.post(ob_, f"/org/release/{slot_a}", ip="10.2.0.1")
+    with p.app.app_context():
+        after = [o for o in p.org_rows() if o["slug"] == "beta"][0]["traffic"]
+        fresh = p.slot_traffic(slot_a)
+    check("traffic: после освобождения итог не теряется", after == before, f"{after} != {before}")
+    check("traffic: у нового ключа счётчик с нуля", fresh == (0, 0))
+    r = x.post(sc, bp, password=SUPER_PW, passphrase=PH, passphrase2=PH)
+    _, st2, _ = backup.read_backup(backup.decrypt(r.data, PH))
+    check("traffic: счётчики входят в копию", isinstance(st2.get("traffic"), dict) and pub_a in st2["traffic"]["peers"])
+    p5, d5 = load(slots=6)
+    with p5.app.app_context():
+        backup.restore_state(p5.db(), p5.CONF_DIR, st2, confs, p5.TRAFFIC_FILE)
+    check("traffic: восстановление счётчиков", json.loads((d5 / "traffic.json").read_text())["peers"][pub_b]["tx"] == 1024 * 1024)
     # ---------- журнал
     with p.app.app_context():
         acts = [r[0] for r in p.db().execute("SELECT action FROM audit")]

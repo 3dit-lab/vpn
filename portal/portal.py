@@ -55,6 +55,7 @@ import backup
 DEV = os.environ.get("PORTAL_DEV") == "1"
 DATA_DIR = Path(os.environ.get("PORTAL_DATA", "/var/lib/vpn-portal"))
 CONF_DIR = Path(os.environ.get("PORTAL_CONFIGS", str(DATA_DIR / "configs")))
+TRAFFIC_FILE = Path(os.environ.get("PORTAL_TRAFFIC", str(DATA_DIR / "traffic.json")))
 PEERS_FILE = Path(os.environ.get("PORTAL_PEERS", str(DATA_DIR / "peers.json")))
 DB_PATH = DATA_DIR / "portal.db"
 MAX_DEVICES = 3
@@ -167,7 +168,7 @@ code { background:var(--bg); border:1px solid var(--line); border-radius:6px; pa
 """
 
 PEOPLE_TABLE = """<div class="scroll"><table>
-  <tr><th>Фамилия Имя</th><th>Телефон</th><th>Конфигов</th><th>Конфиги (устройства)</th><th>Первая выдача</th><th>Последнее скачивание</th></tr>
+  <tr><th>Фамилия Имя</th><th>Телефон</th><th>Конфигов</th><th>Конфиги (устройства)</th><th>Трафик</th><th>Первая выдача</th><th>Последнее скачивание</th></tr>
   {% for p in people %}
   <tr>
     <td>{{ p.name or '—' }}</td>
@@ -182,11 +183,12 @@ PEOPLE_TABLE = """<div class="scroll"><table>
       </form><br>
       {% else %}<span class="muted">нет</span>{% endfor %}
     </td>
+    <td title="скачано клиентом / отправлено клиентом">{{ fmt_bytes(p.total) }}<br><small class="muted">↓ {{ fmt_bytes(p.tx) }} · ↑ {{ fmt_bytes(p.rx) }}</small></td>
     <td>{{ p.first }}</td>
     <td>{{ p.last }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="6" class="muted">Пока никто не получал конфиги.</td></tr>
+  <tr><td colspan="7" class="muted">Пока никто не получал конфиги.</td></tr>
   {% endfor %}
 </table></div>"""
 
@@ -357,6 +359,7 @@ TEMPLATES = {
   <div class="stat"><b>{{ stats.free_limit }}</b>можно выдать ещё</div>
   <div class="stat"><b>{{ stats.people }}</b>человек</div>
   <div class="stat"><b>{{ stats.by_count[1] }} / {{ stats.by_count[2] }} / {{ stats.by_count[3] }}</b>с 1 / 2 / 3 конфигами</div>
+  <div class="stat"><b>{{ fmt_bytes(stats.total) }}</b>трафик всего</div>
 </div>
 {% if org.enabled and stats.free_limit == 0 %}<div class="msg err">Лимит ключей организации исчерпан. Чтобы увеличить его, обратитесь к общему администратору.</div>{% endif %}
 <div class="card">
@@ -386,7 +389,7 @@ TEMPLATES = {
 <div class="card scroll">
   <h2>Организации</h2>
   <table>
-    <tr><th>Организация</th><th>Логин</th><th>Код</th><th>Статус</th><th>Выдано / лимит</th><th>Людей</th><th>Лимит ключей</th><th>Доступ</th></tr>
+    <tr><th>Организация</th><th>Логин</th><th>Код</th><th>Статус</th><th>Выдано / лимит</th><th>Трафик</th><th>Людей</th><th>Лимит ключей</th><th>Доступ</th></tr>
     {% for o in orgs %}
     <tr>
       <td><a href="/super/org/{{ o.id }}">{{ o.name }}</a></td>
@@ -394,6 +397,7 @@ TEMPLATES = {
       <td><code>{{ o.code }}</code></td>
       <td><span class="badge {{ 'on' if o.enabled else 'off' }}">{{ 'включена' if o.enabled else 'отключена' }}</span></td>
       <td>{{ o.issued }} / {{ o.key_limit }}<div class="bar{% if o.issued >= o.key_limit %} full{% endif %}"><i style="width:{{ o.percent }}%"></i></div></td>
+      <td title="скачано клиентами / отправлено клиентами">{{ fmt_bytes(o.traffic) }}<br><small class="muted">↓ {{ fmt_bytes(o.tx) }} · ↑ {{ fmt_bytes(o.rx) }}</small></td>
       <td>{{ o.people }}</td>
       <td>
         <form method="post" action="/super/org/{{ o.id }}/limit" class="inline">
@@ -454,6 +458,7 @@ TEMPLATES = {
   <div class="stat"><b>{{ stats.free_limit }}</b>осталось в лимите</div>
   <div class="stat"><b>{{ stats.people }}</b>человек</div>
   <div class="stat"><b>{{ stats.by_count[1] }} / {{ stats.by_count[2] }} / {{ stats.by_count[3] }}</b>с 1 / 2 / 3 конфигами</div>
+  <div class="stat"><b>{{ fmt_bytes(stats.total) }}</b>трафик всего</div>
 </div>
 {% if org.key_limit < stats.issued %}<div class="warn">Лимит ({{ org.key_limit }}) ниже числа выданных ключей ({{ stats.issued }}): новые ключи не выдаются, уже выданные продолжают работать.</div>{% endif %}
 
@@ -544,6 +549,8 @@ CREATE TABLE IF NOT EXISTS people (
     phone TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
+    rx_archived INTEGER NOT NULL DEFAULT 0,
+    tx_archived INTEGER NOT NULL DEFAULT 0,
     UNIQUE(org_id, phone)
 );
 CREATE TABLE IF NOT EXISTS assignments (
@@ -627,6 +634,9 @@ def init_db():
         c.execute("PRAGMA journal_mode=WAL")
         migrate_v1(c)
         c.executescript(SCHEMA)
+        for col in ("rx_archived", "tx_archived"):  # базы, созданные до появления учёта трафика
+            if col not in _columns(c, "people"):
+                c.execute(f"ALTER TABLE people ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
         c.execute("PRAGMA user_version=2")
         write_peers(c)
         c.close()
@@ -724,6 +734,47 @@ def write_peers(c):
     tmp.write_text(payload)
     os.chmod(tmp, 0o600)
     os.replace(tmp, PEERS_FILE)
+
+
+_traffic_cache = {"stamp": None, "data": {}}
+
+
+def traffic_totals():
+    """Накопленный трафик по публичным ключам из traffic.json (его ведёт служба vpn-traffic от root)."""
+    try:
+        st = TRAFFIC_FILE.stat()
+    except OSError:
+        return {}
+    stamp = (st.st_mtime_ns, st.st_size)
+    if _traffic_cache["stamp"] != stamp:
+        try:
+            raw = json.loads(TRAFFIC_FILE.read_text()).get("peers", {})
+            data = {k: (int(v.get("rx", 0)), int(v.get("tx", 0))) for k, v in raw.items() if isinstance(v, dict)}
+        except (OSError, ValueError, AttributeError, TypeError):
+            data = {}
+        _traffic_cache.update(stamp=stamp, data=data)
+    return _traffic_cache["data"]
+
+
+def slot_traffic(slot, totals=None):
+    """(получено сервером от клиента, отправлено клиенту) по текущему ключу конфига."""
+    info = peer_info(slot)
+    if not info:
+        return 0, 0
+    return (totals if totals is not None else traffic_totals()).get(info["public"], (0, 0))
+
+
+def fmt_bytes(n):
+    n = int(n or 0)
+    if n < 1024:
+        return f"{n} Б"
+    for unit in ("КБ", "МБ", "ГБ", "ТБ"):
+        n /= 1024
+        if n < 1024 or unit == "ТБ":
+            return f"{n:.0f} {unit}" if n >= 100 else f"{n:.1f} {unit}"
+
+
+app.jinja_env.globals["fmt_bytes"] = fmt_bytes
 
 
 def rotate_slot(slot):
@@ -1172,21 +1223,27 @@ def start_admin_session(role, **extra):
 def load_people(org_id):
     c = db()
     people = {}
-    for p in c.execute("SELECT id, phone, name, created_at FROM people WHERE org_id=? ORDER BY name COLLATE NOCASE, phone", (org_id,)):
+    totals = traffic_totals()
+    for p in c.execute("SELECT id, phone, name, created_at, rx_archived, tx_archived FROM people WHERE org_id=? ORDER BY name COLLATE NOCASE, phone", (org_id,)):
         people[p["id"]] = {"phone": phone_display(p["phone"]), "raw": p["phone"], "name": p["name"],
-                           "confs": [], "first_ts": None, "last_ts": None}
+                           "confs": [], "first_ts": None, "last_ts": None,
+                           "rx": p["rx_archived"], "tx": p["tx_archived"]}
     for a in c.execute("SELECT a.slot, a.person_id, a.label, a.assigned_at, a.last_download_at FROM assignments a "
                        "JOIN people p ON p.id=a.person_id WHERE p.org_id=? ORDER BY a.assigned_at, a.slot", (org_id,)):
         p = people.get(a["person_id"])
         if p is None:
             continue
-        p["confs"].append({"slot": a["slot"], "label": a["label"]})
+        rx, tx = slot_traffic(a["slot"], totals)
+        p["rx"] += rx
+        p["tx"] += tx
+        p["confs"].append({"slot": a["slot"], "label": a["label"], "rx": rx, "tx": tx})
         p["first_ts"] = min(p["first_ts"] or a["assigned_at"], a["assigned_at"])
         if a["last_download_at"]:
             p["last_ts"] = max(p["last_ts"] or 0, a["last_download_at"])
     out = list(people.values())
     for p in out:
         p["first"], p["last"] = fmt(p["first_ts"]), fmt(p["last_ts"])
+        p["total"] = p["rx"] + p["tx"]
     return out
 
 
@@ -1196,7 +1253,8 @@ def org_stats(org, people):
     for p in people:
         if len(p["confs"]) in by_count:
             by_count[len(p["confs"])] += 1
-    return {"issued": issued, "people": len(people), "by_count": by_count,
+    rx, tx = sum(p["rx"] for p in people), sum(p["tx"] for p in people)
+    return {"issued": issued, "people": len(people), "by_count": by_count, "rx": rx, "tx": tx, "total": rx + tx,
             "free_limit": max(org["key_limit"] - issued, 0)}
 
 
@@ -1204,11 +1262,12 @@ def people_csv(people, org_name=None):
     buf = io.StringIO()
     buf.write("﻿")  # BOM, чтобы Excel правильно открыл кириллицу
     w = csv.writer(buf, delimiter=";")
-    header = ["Фамилия Имя", "Телефон", "Конфигов", "Конфиги", "Первая выдача", "Последнее скачивание"]
+    header = ["Фамилия Имя", "Телефон", "Конфигов", "Конфиги", "Первая выдача", "Последнее скачивание",
+              "Трафик всего, байт", "Скачано клиентом, байт", "Отправлено клиентом, байт"]
     w.writerow(header)
     for p in people:
         confs = ", ".join(f"№{i['slot']:03d}" + (f" ({csv_safe(i['label'])})" if i["label"] else "") for i in p["confs"])
-        w.writerow([csv_safe(p["name"]), p["raw"], len(p["confs"]), confs, p["first"], p["last"]])
+        w.writerow([csv_safe(p["name"]), p["raw"], len(p["confs"]), confs, p["first"], p["last"], p["total"], p["tx"], p["rx"]])
     return buf.getvalue()
 
 
@@ -1219,12 +1278,14 @@ def release_slot(slot, actor, org_id=None):
     if not row or (org_id is not None and row["org_id"] != org_id):
         flash("Конфиг не найден.", "err")
         return False
+    rx, tx = slot_traffic(slot)
     try:
         rotate_slot(slot)
     except (OSError, RuntimeError) as e:
         log.error("release: не удалось заменить ключи конфига №%03d: %s", slot, e)
         flash(f"Не удалось заменить ключи конфига №{slot:03d}, конфиг не освобождён.", "err")
         return False
+    c.execute("UPDATE people SET rx_archived=rx_archived+?, tx_archived=tx_archived+? WHERE id=(SELECT person_id FROM assignments WHERE slot=?)", (rx, tx, slot))
     c.execute("DELETE FROM assignments WHERE slot=?", (slot,))
     audit(actor, "освобождён конфиг", f"№{slot:03d} ({mask_phone(row['phone'])}), ключи заменены", row["org_id"])
     write_peers(c)
@@ -1366,9 +1427,21 @@ def org_rows():
         "SELECT o.*, (SELECT COUNT(*) FROM people p WHERE p.org_id=o.id) AS people, "
         "(SELECT COUNT(*) FROM assignments a JOIN people p ON p.id=a.person_id WHERE p.org_id=o.id) AS issued "
         "FROM orgs o ORDER BY o.name COLLATE NOCASE").fetchall()
+    totals = traffic_totals()
+    used = {}
+    c = db()
+    for r in c.execute("SELECT org_id, SUM(rx_archived) rx, SUM(tx_archived) tx FROM people GROUP BY org_id"):
+        used[r["org_id"]] = [r["rx"] or 0, r["tx"] or 0]
+    for r in c.execute("SELECT a.slot, p.org_id FROM assignments a JOIN people p ON p.id=a.person_id"):
+        rx, tx = slot_traffic(r["slot"], totals)
+        u = used.setdefault(r["org_id"], [0, 0])
+        u[0] += rx
+        u[1] += tx
     out = []
     for r in rows:
         d = dict(r)
+        d["rx"], d["tx"] = used.get(r["id"], [0, 0])
+        d["traffic"] = d["rx"] + d["tx"]
         d["has_admin"] = bool(r["admin_hash"])
         d["percent"] = 100 if r["key_limit"] <= 0 else min(100, r["issued"] * 100 // r["key_limit"])
         out.append(d)
@@ -1583,10 +1656,10 @@ def super_export():
     buf = io.StringIO()
     buf.write("﻿")
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Организация", "Логин", "Код доступа", "Статус", "Выдано ключей", "Лимит ключей", "Людей"])
+    w.writerow(["Организация", "Логин", "Код доступа", "Статус", "Выдано ключей", "Лимит ключей", "Людей", "Трафик всего, байт"])
     for o in org_rows():
         w.writerow([csv_safe(o["name"]), o["slug"], o["code"], "включена" if o["enabled"] else "отключена",
-                    o["issued"], o["key_limit"], o["people"]])
+                    o["issued"], o["key_limit"], o["people"], o["traffic"]])
     return Response(buf.getvalue(), mimetype="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="vpn-organizations.csv"'})
 
@@ -1616,7 +1689,7 @@ def super_backup():
     if phrase != phrase2:
         flash("Парольные фразы не совпадают.", "err")
         return redirect("/super/backup")
-    plain, manifest = backup.dump_state(db(), CONF_DIR)
+    plain, manifest = backup.dump_state(db(), CONF_DIR, TRAFFIC_FILE)
     blob = backup.encrypt(plain, phrase)
     counts = manifest["counts"]
     audit("super", "создана резервная копия", f"организаций {counts['orgs']}, людей {counts['people']}, выдано {counts['assignments']}, конфигов {counts['configs']}")

@@ -1,0 +1,7 @@
+[Unit]
+Description=Collect per-peer traffic counters of AmneziaWG
+After=awg-quick@awg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-portal/collect-traffic.py

@@ -53,9 +53,13 @@ def _rows(conn, table):
     return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1")]
 
 
-def dump_state(conn, conf_dir):
+def dump_state(conn, conf_dir, traffic_file=None):
     """Собирает tar.gz (в памяти) с состоянием портала и всеми конфигами."""
     state = {t: _rows(conn, t) for t in TABLES}
+    try:  # накопленные счётчики трафика по ключам (их ведёт служба vpn-traffic)
+        state["traffic"] = json.loads(Path(traffic_file).read_text()) if traffic_file else None
+    except (OSError, ValueError):
+        state["traffic"] = None
     confs = {}
     for f in sorted(Path(conf_dir).iterdir()):
         if CONF_NAME_RE.match(f.name):
@@ -116,7 +120,7 @@ def read_backup(plain):
     return manifest, state, configs
 
 
-def restore_state(conn, conf_dir, state, configs):
+def restore_state(conn, conf_dir, state, configs, traffic_file=None):
     """Полностью заменяет организации, людей, выдачи и журнал состоянием из копии и записывает конфиги."""
     ids_org = {o["id"] for o in state["orgs"]}
     ids_person = {p["id"] for p in state["people"]}
@@ -151,3 +155,10 @@ def restore_state(conn, conf_dir, state, configs):
         tmp.write_bytes(data)
         os.chmod(tmp, 0o600)
         os.replace(tmp, conf_dir / name)
+
+    if traffic_file and isinstance(state.get("traffic"), dict):
+        tf = Path(traffic_file)
+        tmp = tf.with_name("." + tf.name + ".tmp")
+        tmp.write_text(json.dumps(state["traffic"]))
+        os.chmod(tmp, 0o640)
+        os.replace(tmp, tf)
