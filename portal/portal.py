@@ -3,7 +3,8 @@
 
 Один общий QR ведёт на портал. Сотрудник вводит код доступа СВОЕЙ организации (5 цифр), телефон и фамилию с
 именем (без SMS; имя нужно только для таблицы) и решает капчу. Он получает первый свободный конфиг из общего пула;
-на человека до 3 конфигов (по одному на устройство), скачать свой конфиг можно повторно.
+на человека число конфигов не ограничено (по одному на устройство), пока хватает лимита ключей организации;
+администратор может вручную задать лимит устройств для конкретного человека. Скачать свой конфиг можно повторно.
 
 Уровни доступа:
   * сотрудник      : /                      (код организации + телефон)
@@ -58,7 +59,6 @@ CONF_DIR = Path(os.environ.get("PORTAL_CONFIGS", str(DATA_DIR / "configs")))
 TRAFFIC_FILE = Path(os.environ.get("PORTAL_TRAFFIC", str(DATA_DIR / "traffic.json")))
 PEERS_FILE = Path(os.environ.get("PORTAL_PEERS", str(DATA_DIR / "peers.json")))
 DB_PATH = DATA_DIR / "portal.db"
-MAX_DEVICES = 3
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
 DEFAULT_ORG_LIMIT = 10
@@ -168,12 +168,21 @@ code { background:var(--bg); border:1px solid var(--line); border-radius:6px; pa
 """
 
 PEOPLE_TABLE = """<div class="scroll"><table>
-  <tr><th>Фамилия Имя</th><th>Телефон</th><th>Конфигов</th><th>Конфиги (устройства)</th><th>Трафик</th><th>Первая выдача</th><th>Последнее скачивание</th></tr>
+  <tr><th>Фамилия Имя</th><th>Телефон</th><th>Конфигов</th><th>Лимит устройств</th><th>Конфиги (устройства)</th><th>Трафик</th><th>Первая выдача</th><th>Последнее скачивание</th></tr>
   {% for p in people %}
   <tr>
     <td>{{ p.name or '—' }}</td>
     <td>{{ p.phone }}</td>
     <td>{{ p.confs|length }}</td>
+    <td>
+      {% if can_release %}
+      <form method="post" action="{{ limit_url }}{{ p.id }}/limit" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input name="limit" type="text" inputmode="numeric" maxlength="4" value="{{ p.dev_limit if p.dev_limit is not none else '' }}" placeholder="без лимита" style="width:6.5em;padding:4px 8px;margin:0">
+        <button class="btn secondary sm" type="submit">OK</button>
+      </form>
+      {% else %}{{ p.dev_limit if p.dev_limit is not none else 'без лимита' }}{% endif %}
+    </td>
     <td>
       {% for a in p.confs %}
       <form method="post" action="{{ release_url }}{{ a.slot }}" class="inline" onsubmit="return confirm('Освободить конфиг №{{ '%03d' % a.slot }}? Ключ будет заменён: устройство, где он установлен, перестанет подключаться, а конфиг вернётся в пул.');">
@@ -188,7 +197,7 @@ PEOPLE_TABLE = """<div class="scroll"><table>
     <td>{{ p.last }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="muted">Пока никто не получал конфиги.</td></tr>
+  <tr><td colspan="8" class="muted">Пока никто не получал конфиги.</td></tr>
   {% endfor %}
 </table></div>"""
 
@@ -247,7 +256,7 @@ TEMPLATES = {
 <h1>Доступ к VPN</h1>
 <p class="sub">{{ org_name }} · {{ name }} · {{ phone }}</p>
 
-<div class="warn">Конфиг личный: не пересылайте его другим людям. Один конфиг работает только на одном устройстве. Для второго и третьего устройства получите отдельные конфиги ниже.</div>
+<div class="warn">Конфиг личный: не пересылайте его другим людям. Один конфиг работает только на одном устройстве. Для каждого следующего устройства получите отдельный конфиг ниже.</div>
 
 <div class="card">
   <h2>Мои конфиги</h2>
@@ -263,7 +272,7 @@ TEMPLATES = {
   <p class="muted">Конфигов пока нет. Нажмите кнопку ниже, чтобы получить первый.</p>
   {% endfor %}
 
-  {% if devices|length < max_devices %}
+  {% if dev_limit is none or devices|length < dev_limit %}
   <form method="post" action="/claim" onsubmit="return confirm('Получить {{ 'конфиг' if not devices else 'дополнительный конфиг' }}? Он закрепляется за вами.');">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="label">Название устройства <small>(необязательно)</small></label>
@@ -271,7 +280,7 @@ TEMPLATES = {
     <button class="btn primary" type="submit">{% if not devices %}Получить конфиг{% else %}Получить конфиг для устройства {{ devices|length + 1 }}{% endif %}</button>
   </form>
   {% else %}
-  <p><small>Выдано максимальное число конфигов ({{ max_devices }}).</small></p>
+  <p><small>Выдано максимальное число конфигов ({{ dev_limit }}): такой лимит задал администратор организации.</small></p>
   {% endif %}
   <p><small>Переустановили приложение или сменили телефон? Новый конфиг не нужен: скачайте свой прежний конфиг заново.</small></p>
 </div>
@@ -355,15 +364,14 @@ TEMPLATES = {
 <p class="sub">Администратор организации · код доступа для сотрудников: <b>{{ org.code }}</b></p>
 {% if not org.enabled %}<div class="msg err">Доступ вашей организации отключён общим администратором. Сотрудники не могут входить и подключаться. Изменения недоступны, обратитесь в поддержку: it@3dit.ru</div>{% endif %}
 <div class="stats">
-  <div class="stat"><b>{{ stats.issued }} из {{ org.key_limit }}</b>выдано ключей</div>
+  <div class="stat"><b>{{ stats.issued }} из {{ org.key_limit }}</b>конфигов выдано</div>
   <div class="stat"><b>{{ stats.free_limit }}</b>можно выдать ещё</div>
   <div class="stat"><b>{{ stats.people }}</b>человек</div>
-  <div class="stat"><b>{{ stats.by_count[1] }} / {{ stats.by_count[2] }} / {{ stats.by_count[3] }}</b>с 1 / 2 / 3 конфигами</div>
   <div class="stat"><b>{{ fmt_bytes(stats.total) }}</b>трафик всего</div>
 </div>
 {% if org.enabled and stats.free_limit == 0 %}<div class="msg err">Лимит ключей организации исчерпан. Чтобы увеличить его, обратитесь к общему администратору.</div>{% endif %}
 <div class="card">
-  {% with release_url='/org/release/', can_release=org.enabled %}{% include "people_table.html" %}{% endwith %}
+  {% with release_url='/org/release/', limit_url='/org/person/', can_release=org.enabled %}{% include "people_table.html" %}{% endwith %}
   <p><a href="/org/export.csv">Скачать таблицу (CSV)</a></p>
 </div>
 {% include "audit_table.html" %}
@@ -454,10 +462,9 @@ TEMPLATES = {
 <h1>{{ org.name }} <span class="badge {{ 'on' if org.enabled else 'off' }}">{{ 'включена' if org.enabled else 'отключена' }}</span></h1>
 <p class="sub">Логин администратора: <b>{{ org.slug }}</b> · код доступа: <code>{{ org.code }}</code></p>
 <div class="stats">
-  <div class="stat"><b>{{ stats.issued }} из {{ org.key_limit }}</b>выдано ключей</div>
+  <div class="stat"><b>{{ stats.issued }} из {{ org.key_limit }}</b>конфигов выдано</div>
   <div class="stat"><b>{{ stats.free_limit }}</b>осталось в лимите</div>
   <div class="stat"><b>{{ stats.people }}</b>человек</div>
-  <div class="stat"><b>{{ stats.by_count[1] }} / {{ stats.by_count[2] }} / {{ stats.by_count[3] }}</b>с 1 / 2 / 3 конфигами</div>
   <div class="stat"><b>{{ fmt_bytes(stats.total) }}</b>трафик всего</div>
 </div>
 {% if org.key_limit < stats.issued %}<div class="warn">Лимит ({{ org.key_limit }}) ниже числа выданных ключей ({{ stats.issued }}): новые ключи не выдаются, уже выданные продолжают работать.</div>{% endif %}
@@ -501,7 +508,7 @@ TEMPLATES = {
 
 <div class="card">
   <h2>Сотрудники</h2>
-  {% with release_url='/super/release/', can_release=True %}{% include "people_table.html" %}{% endwith %}
+  {% with release_url='/super/release/', limit_url='/super/person/', can_release=True %}{% include "people_table.html" %}{% endwith %}
 </div>
 {% include "audit_table.html" %}
 {% endblock %}""",
@@ -551,6 +558,7 @@ CREATE TABLE IF NOT EXISTS people (
     created_at INTEGER NOT NULL,
     rx_archived INTEGER NOT NULL DEFAULT 0,
     tx_archived INTEGER NOT NULL DEFAULT 0,
+    dev_limit INTEGER,
     UNIQUE(org_id, phone)
 );
 CREATE TABLE IF NOT EXISTS assignments (
@@ -634,9 +642,10 @@ def init_db():
         c.execute("PRAGMA journal_mode=WAL")
         migrate_v1(c)
         c.executescript(SCHEMA)
-        for col in ("rx_archived", "tx_archived"):  # базы, созданные до появления учёта трафика
+        for col, ddl in (("rx_archived", "INTEGER NOT NULL DEFAULT 0"), ("tx_archived", "INTEGER NOT NULL DEFAULT 0"),
+                         ("dev_limit", "INTEGER")):  # базы, созданные до появления этих полей
             if col not in _columns(c, "people"):
-                c.execute(f"ALTER TABLE people ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+                c.execute(f"ALTER TABLE people ADD COLUMN {col} {ddl}")
         c.execute("PRAGMA user_version=2")
         write_peers(c)
         c.close()
@@ -1033,7 +1042,7 @@ def current_person():
     if not org_id or not phone:
         return None
     return db().execute(
-        "SELECT p.id, p.org_id, p.phone, p.name, o.name AS org_name, o.enabled AS org_enabled, o.key_limit AS org_limit "
+        "SELECT p.id, p.org_id, p.phone, p.name, p.dev_limit, o.name AS org_name, o.enabled AS org_enabled, o.key_limit AS org_limit "
         "FROM people p JOIN orgs o ON o.id=p.org_id WHERE p.org_id=? AND p.phone=?", (org_id, phone)).fetchone()
 
 
@@ -1051,7 +1060,7 @@ def index():
                         (person["id"],)).fetchall()
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"])} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
-                org_name=person["org_name"], devices=devices, max_devices=MAX_DEVICES)
+                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"])
 
 
 @app.route("/login", methods=["POST"])
@@ -1136,8 +1145,8 @@ def claim():
         problem = None
         if not org or not org["enabled"]:
             problem = "Доступ для вашей организации отключён."
-        elif have >= MAX_DEVICES:
-            problem = f"Вам уже выдано максимальное число конфигов ({MAX_DEVICES})."
+        elif person["dev_limit"] is not None and have >= person["dev_limit"]:
+            problem = f"Администратор ограничил число ваших устройств: {person['dev_limit']}."
         elif used >= org["key_limit"]:
             problem = "Лимит ключей вашей организации исчерпан. Обратитесь к администратору организации."
         elif not free:
@@ -1224,8 +1233,8 @@ def load_people(org_id):
     c = db()
     people = {}
     totals = traffic_totals()
-    for p in c.execute("SELECT id, phone, name, created_at, rx_archived, tx_archived FROM people WHERE org_id=? ORDER BY name COLLATE NOCASE, phone", (org_id,)):
-        people[p["id"]] = {"phone": phone_display(p["phone"]), "raw": p["phone"], "name": p["name"],
+    for p in c.execute("SELECT id, phone, name, created_at, rx_archived, tx_archived, dev_limit FROM people WHERE org_id=? ORDER BY name COLLATE NOCASE, phone", (org_id,)):
+        people[p["id"]] = {"id": p["id"], "dev_limit": p["dev_limit"], "phone": phone_display(p["phone"]), "raw": p["phone"], "name": p["name"],
                            "confs": [], "first_ts": None, "last_ts": None,
                            "rx": p["rx_archived"], "tx": p["tx_archived"]}
     for a in c.execute("SELECT a.slot, a.person_id, a.label, a.assigned_at, a.last_download_at FROM assignments a "
@@ -1249,12 +1258,8 @@ def load_people(org_id):
 
 def org_stats(org, people):
     issued = sum(len(p["confs"]) for p in people)
-    by_count = {1: 0, 2: 0, 3: 0}
-    for p in people:
-        if len(p["confs"]) in by_count:
-            by_count[len(p["confs"])] += 1
     rx, tx = sum(p["rx"] for p in people), sum(p["tx"] for p in people)
-    return {"issued": issued, "people": len(people), "by_count": by_count, "rx": rx, "tx": tx, "total": rx + tx,
+    return {"issued": issued, "people": len(people), "rx": rx, "tx": tx, "total": rx + tx,
             "free_limit": max(org["key_limit"] - issued, 0)}
 
 
@@ -1262,12 +1267,12 @@ def people_csv(people, org_name=None):
     buf = io.StringIO()
     buf.write("﻿")  # BOM, чтобы Excel правильно открыл кириллицу
     w = csv.writer(buf, delimiter=";")
-    header = ["Фамилия Имя", "Телефон", "Конфигов", "Конфиги", "Первая выдача", "Последнее скачивание",
+    header = ["Фамилия Имя", "Телефон", "Конфигов", "Лимит устройств", "Конфиги", "Первая выдача", "Последнее скачивание",
               "Трафик всего, байт", "Скачано клиентом, байт", "Отправлено клиентом, байт"]
     w.writerow(header)
     for p in people:
         confs = ", ".join(f"№{i['slot']:03d}" + (f" ({csv_safe(i['label'])})" if i["label"] else "") for i in p["confs"])
-        w.writerow([csv_safe(p["name"]), p["raw"], len(p["confs"]), confs, p["first"], p["last"], p["total"], p["tx"], p["rx"]])
+        w.writerow([csv_safe(p["name"]), p["raw"], len(p["confs"]), "" if p["dev_limit"] is None else p["dev_limit"], confs, p["first"], p["last"], p["total"], p["tx"], p["rx"]])
     return buf.getvalue()
 
 
@@ -1358,6 +1363,40 @@ def org_release(slot):
         flash("Доступ организации отключён, изменения недоступны.", "err")
     else:
         release_slot(slot, f"admin {org['slug']}", org_id=org["id"])
+    return redirect("/org")
+
+
+def _set_person_limit(pid, org_id, actor):
+    c = db()
+    row = c.execute("SELECT id, org_id, phone, dev_limit FROM people WHERE id=?", (pid,)).fetchone()
+    if not row or (org_id is not None and row["org_id"] != org_id):
+        flash("Человек не найден.", "err")
+        return None
+    raw = re.sub(r"\s", "", request.form.get("limit", ""))
+    if raw == "":
+        new = None
+    elif raw.isdigit() and int(raw) <= 1000:
+        new = int(raw)
+    else:
+        flash("Лимит устройств: число от 0 до 1000 или пусто (без ограничения).", "err")
+        return row["org_id"]
+    c.execute("UPDATE people SET dev_limit=? WHERE id=?", (new, pid))
+    audit(actor, "лимит устройств", f"{mask_phone(row['phone'])}: {'без лимита' if row['dev_limit'] is None else row['dev_limit']} -> {'без лимита' if new is None else new}", row["org_id"])
+    flash("Лимит устройств сохранён." if new is not None else "Лимит устройств снят.", "ok")
+    return row["org_id"]
+
+
+@app.route("/org/person/<int:pid>/limit", methods=["POST"])
+def org_person_limit(pid):
+    org = current_org_admin()
+    if not org:
+        return redirect("/org/login")
+    if not check_csrf():
+        flash("Сессия устарела, обновите страницу.", "err")
+    elif not org["enabled"]:
+        flash("Доступ организации отключён, изменения недоступны.", "err")
+    else:
+        _set_person_limit(pid, org["id"], f"admin {org['slug']}")
     return redirect("/org")
 
 
@@ -1647,6 +1686,13 @@ def super_release(slot):
     row = db().execute("SELECT p.org_id FROM assignments a JOIN people p ON p.id=a.person_id WHERE a.slot=?", (slot,)).fetchone()
     release_slot(slot, "super")
     return redirect(f"/super/org/{row['org_id']}" if row else "/super")
+
+
+@app.route("/super/person/<int:pid>/limit", methods=["POST"])
+@super_post
+def super_person_limit(pid):
+    oid = _set_person_limit(pid, None, "super")
+    return redirect(f"/super/org/{oid}" if oid else "/super")
 
 
 @app.route("/super/export.csv")

@@ -184,7 +184,7 @@ def main():
           and "3dit-vpn-" in r.headers["Content-Disposition"])
     for i in range(3):
         x.claim(e3)
-    check("emp: Бета до 3 устройств на человека", len(x.slots()) == 5)  # 2 Альфа + 3 Бета
+    check("emp: без лимита устройств — 3 конфига у одного человека", len(x.slots()) == 5)  # 2 Альфа + 3 Бета
 
     # peers.json
     pe = peers_of(d)
@@ -390,6 +390,41 @@ def main():
     with p5.app.app_context():
         backup.restore_state(p5.db(), p5.CONF_DIR, st2, confs, p5.TRAFFIC_FILE)
     check("traffic: восстановление счётчиков", json.loads((d5 / "traffic.json").read_text())["peers"][pub_b]["tx"] == 1024 * 1024)
+    # ---------- лимит устройств на человека
+    for _ in range(2):
+        x.claim(e3)
+    with p.app.app_context():
+        pid = p.db().execute("SELECT pe.id FROM people pe JOIN orgs o ON o.id=pe.org_id WHERE o.slug='beta' AND pe.phone='+79001112233'").fetchone()[0]
+        have = p.db().execute("SELECT COUNT(*) FROM assignments WHERE person_id=?", (pid,)).fetchone()[0]
+    check("devlimit: без лимита можно больше 3", have >= 4, str(have))
+    ob2 = x.client()
+    x.org_login(ob2, "beta", pw_b)
+    x.post(ob2, f"/org/person/{pid}/limit", ip="10.2.0.1", limit=str(have))
+    r = x.claim(e3)
+    check("devlimit: админ организации ограничил вручную", "ограничил число" in r.get_data(as_text=True))
+    with p.app.app_context():
+        check("devlimit: значение сохранено", p.db().execute("SELECT dev_limit FROM people WHERE id=?", (pid,)).fetchone()[0] == have)
+    page_html = e3.get("/").get_data(as_text=True)
+    check("devlimit: кнопка получения скрыта", "/claim" not in page_html)
+    x.post(ob2, f"/org/person/{pid}/limit", ip="10.2.0.1", limit="abc")
+    with p.app.app_context():
+        check("devlimit: мусор отклонён", p.db().execute("SELECT dev_limit FROM people WHERE id=?", (pid,)).fetchone()[0] == have)
+    oc3 = x.client()
+    x.org_login(oc3, "gamma", "x") if x.org("gamma") else None
+    x.post(sc, f"/super/person/{pid}/limit", limit="")
+    with p.app.app_context():
+        check("devlimit: общий админ снял лимит", p.db().execute("SELECT dev_limit FROM people WHERE id=?", (pid,)).fetchone()[0] is None)
+    r = x.claim(e3)
+    check("devlimit: после снятия можно снова", "выдан" in r.get_data(as_text=True))
+    other = x.client()
+    x.emp_login(other, "22222", phone="+79004445566", name="Другой Человек")
+    with p.app.app_context():
+        other_pid = p.db().execute("SELECT id FROM people WHERE phone='+79004445566'").fetchone()[0]
+    x.post(ob2, f"/org/person/{other_pid}/limit", ip="10.2.0.1", limit="1")
+    html = ob2.get("/org").get_data(as_text=True)
+    check("page: нет счётчика 1/2/3", "1 / 2 / 3" not in html)
+    check("page: есть число людей и конфигов", "конфигов выдано" in html and "человек" in html)
+
     # ---------- журнал
     with p.app.app_context():
         acts = [r[0] for r in p.db().execute("SELECT action FROM audit")]
