@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic peers sync (safety net and boot)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

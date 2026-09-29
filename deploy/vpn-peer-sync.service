@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync AmneziaWG peers with the VPN portal
+After=awg-quick@awg0.service
+Wants=awg-quick@awg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-portal/sync-peers.py

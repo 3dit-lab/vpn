@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the portal peers list
+
+[Path]
+PathChanged=/var/lib/vpn-portal/peers.json
+Unit=vpn-peer-sync.service
+
+[Install]
+WantedBy=multi-user.target
