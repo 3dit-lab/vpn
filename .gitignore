@@ -2,3 +2,5 @@ secrets/
 out/
 age-key.txt
 *.key
+__pycache__/
+*.pyc

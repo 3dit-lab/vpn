@@ -23,7 +23,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 ROOT = Path(__file__).resolve().parent.parent
-QR_MAX_BYTES = 2900  # QR версии 40 уровня L вмещает 2953 байта
 
 
 def b64(raw: bytes) -> str:
@@ -128,7 +127,6 @@ def main():
     out = Path(args.out)
     (out / "server").mkdir(parents=True, exist_ok=True)
     (out / "clients").mkdir(exist_ok=True)
-    (out / "qr").mkdir(exist_ok=True)
 
     # ---- сервер ----
     srv = [
@@ -158,9 +156,7 @@ def main():
     os.chmod(srv_path, 0o600)
 
     # ---- клиенты ----
-    import qrcode
-
-    rows, qr_ok, sizes = [], 0, []
+    rows, sizes = [], []
     for name, c in sorted(state["clients"].items()):
         lines = [
             "[Interface]",
@@ -184,24 +180,16 @@ def main():
         os.chmod(conf_path, 0o600)
         size = len(text.encode())
         sizes.append(size)
-        has_qr = size <= QR_MAX_BYTES
-        if has_qr:
-            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=4, border=2)
-            qr.add_data(text)
-            qr.make(fit=True)
-            qr.make_image().save(out / "qr" / f"{name}.png")
-            qr_ok += 1
-        rows.append([name, c["ip"], c["public"], size, "yes" if has_qr else "no"])
+        rows.append([name, c["ip"], c["public"], size])
 
     with open(ROOT / "clients.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["name", "ip", "public_key", "conf_bytes", "qr"])
+        w.writerow(["name", "ip", "public_key", "conf_bytes"])
         w.writerows(rows)
 
     print(f"Клиентов: {len(state['clients'])}")
     print(f"AllowedIPs: {len(allowed)} подсетей после объединения")
     print(f"Размер клиентского .conf: {min(sizes)}..{max(sizes)} байт")
-    print(f"QR получилось построить для {qr_ok} из {len(rows)} (лимит {QR_MAX_BYTES} байт)")
     print(f"Endpoint: {args.endpoint}:{args.port}")
 
 
