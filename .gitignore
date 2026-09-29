@@ -1,0 +1,4 @@
+secrets/
+out/
+age-key.txt
+*.key
