@@ -1,0 +1,39 @@
+# Защита портала и nginx. Баны действуют только на TCP 80/443, сам VPN (UDP 51820) не затрагивается.
+# Адреса из ignoreip не банятся никогда (подставляет scripts/setup-web.sh).
+[DEFAULT]
+ignoreip = __IGNOREIP__
+
+# неверная капча / код / пароль администратора: 6 неудач за 10 минут -> бан на час
+[vpn-portal-auth]
+enabled  = true
+port     = http,https
+filter   = vpn-portal-auth
+logpath  = /var/log/vpn-portal/auth.log
+maxretry = 6
+findtime = 10m
+bantime  = 1h
+
+# превышение лимита запросов nginx (limit_req)
+[nginx-limit-req]
+enabled  = true
+port     = http,https
+logpath  = /var/log/nginx/error.log
+maxretry = 10
+findtime = 1m
+bantime  = 30m
+
+# сканеры, ищущие типовые уязвимые адреса (wp-login.php и подобные)
+[nginx-botsearch]
+enabled  = true
+port     = http,https
+logpath  = /var/log/nginx/access.log
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+
+# повторные нарушители блокируются надолго
+[recidive]
+enabled  = true
+maxretry = 3
+findtime = 1d
+bantime  = 1w

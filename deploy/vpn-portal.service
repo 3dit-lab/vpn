@@ -1,0 +1,33 @@
+[Unit]
+Description=VPN config portal (3dit)
+After=network.target
+
+[Service]
+User=vpnportal
+Group=vpnportal
+EnvironmentFile=/etc/vpn-portal.env
+WorkingDirectory=/opt/vpn-portal
+ExecStart=/usr/bin/gunicorn --workers 2 --bind 127.0.0.1:8081 portal:app
+Restart=on-failure
+RestartSec=3
+
+# каталоги данных и логов принадлежат сервису; конфиги с ключами доступны только ему
+StateDirectory=vpn-portal
+StateDirectoryMode=0700
+LogsDirectory=vpn-portal
+LogsDirectoryMode=0755
+
+# ограничения процесса
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
