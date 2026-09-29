@@ -20,7 +20,7 @@ VPN-сервер `pm-vpn.3dit.ru` (UDP 51820) и портал выдачи кл�
 | Файл | Назначение |
 |---|---|
 | `allowed-ips.txt` | Подсети, которые уходят через VPN (попадают в `AllowedIPs` клиентов) |
-| `scripts/generate.py` | Ключи, серверный `awg0.conf`, клиентские `.conf` (пул из 150 конфигов) |
+| `scripts/generate.py` | Ключи, серверный `awg0.conf`, клиентские `.conf` (пул из 500 конфигов, подсеть 10.8.0.0/23) |
 | `scripts/install-server.sh` | Установка AmneziaWG на Ubuntu и запуск `awg0` |
 | `portal/portal.py` | Портал (Flask + SQLite): организации, выдача конфигов, капча, два уровня администраторов |
 | `portal/backup.py` | Шифрованная резервная копия состояния портала (для переезда) |
@@ -45,7 +45,7 @@ VPN-сервер `pm-vpn.3dit.ru` (UDP 51820) и портал выдачи кл�
 git clone https://github.com/3dit-lab/vpn && cd vpn
 age -d -i /путь/к/age-key.txt secrets.tar.age | tar xz      # создаст secrets/state.json
 pip install cryptography "qrcode[pil]"
-python3 scripts/generate.py --endpoint pm-vpn.3dit.ru --port 51820 --clients 150
+python3 scripts/generate.py --endpoint pm-vpn.3dit.ru --port 51820 --clients 500 --subnet 10.8.0.0/23
 python3 scripts/make_qr.py  --url https://pm-vpn.3dit.ru/
 # результат в out/: server/awg0.conf, clients/*.conf, qr-portal.png
 ```
@@ -83,7 +83,7 @@ python3 scripts/make_qr.py  --url https://pm-vpn.3dit.ru/
 ### Лимиты, отключение и освобождение
 
 - **Лимит ключей** организации: сколько конфигов могут получить все её сотрудники вместе. Уменьшение лимита ниже уже
-  выданного ничего не отзывает, но новые ключи не выдаются. Сумма лимитов может превышать размер пула (150): портал
+  выданного ничего не отзывает, но новые ключи не выдаются. Сумма лимитов может превышать размер пула (500): портал
   выдаёт, пока есть свободные конфиги.
 - **Отключение организации** (`/super`): сотрудники не могут войти, а её конфиги **перестают работать на VPN**
   (пиры исключаются из `awg0.conf` службой `vpn-peer-sync` в течение секунд). Включение возвращает всё как было, ключи не меняются.
@@ -108,10 +108,10 @@ python3 scripts/make_qr.py  --url https://pm-vpn.3dit.ru/
 
 ## Пул конфигов и добавление клиентов
 
-Сейчас 150 конфигов. Если свободные закончились (админка показывает остаток), увеличьте `--clients` (например, 200)
+Сейчас 500 конфигов (подсеть 10.8.0.0/23, две /24). Если свободные закончились (админка показывает остаток), увеличьте `--clients` (не более 510 в /23; больше: укажите более широкую `--subnet`, например 10.8.0.0/22)
 и запустите `generate.py`: существующие конфиги не меняются, добавляются новые. Затем:
 
-1. обновить `awg0.conf` на сервере и `systemctl restart awg-quick@awg0`;
+1. обновить серверный конфиг: `install -m 600 out/server/awg0.conf /etc/amnezia/amneziawg/awg0.conf; rm -f /etc/amnezia/amneziawg/awg0.base.conf; systemctl restart awg-quick@awg0; systemctl start vpn-peer-sync` (список пиров тут же сократится до выданных через портал; при смене подсети клиентские конфиги остаются прежними, у них адреса /32);
 2. повторить `setup-web.sh clients`: новые файлы попадут в пул, выданные конфиги и база сохранятся;
 3. зашифровать обновлённый `secrets/state.json`:
 

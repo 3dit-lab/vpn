@@ -54,7 +54,8 @@ install -m 755 "$HERE/collect-traffic.py" /opt/vpn-portal/collect-traffic.py
 install -m 755 "$HERE/restore-backup.py" /opt/vpn-portal/restore-backup.py
 install -d -o vpnportal -g vpnportal -m 700 "$DATA" "$DATA/configs"
 for f in "$CONFIGS_SRC"/client*.conf; do
-  install -o vpnportal -g vpnportal -m 600 "$f" "$DATA/configs/$(basename "$f")"
+  # существующие файлы не трогаем: после освобождения конфига в них уже другие (заменённые) ключи
+  [ -e "$DATA/configs/$(basename "$f")" ] || install -o vpnportal -g vpnportal -m 600 "$f" "$DATA/configs/$(basename "$f")"
 done
 install -d -o vpnportal -g vpnportal -m 755 /var/log/vpn-portal
 touch /var/log/vpn-portal/auth.log
