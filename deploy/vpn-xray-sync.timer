@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Xray clients every minute
+
+[Timer]
+OnBootSec=40s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

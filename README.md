@@ -29,7 +29,8 @@ VPN-сервер `pm-vpn.3dit.ru` (UDP 51820) и портал выдачи кл�
 | `scripts/restore-backup.py` | Восстановление резервной копии на новом сервере |
 | `portal/test_portal.py` | Автотесты портала: `python3 portal/test_portal.py` |
 | `scripts/setup-web.sh` | Установка портала, nginx, сертификата Let's Encrypt и fail2ban |
-| `scripts/fetch-apps.sh` | Официальные релизы Amnezia с проверкой SHA256 для раздачи с сервера (`/apps/`) |
+| `scripts/fetch-apps.sh` | Официальные релизы Amnezia и Happ с проверкой SHA256 для раздачи с сервера (`/apps/`) |
+| `scripts/setup-xray.sh`, `sync-xray.py`, `collect-xray-traffic.py` | Xray VLESS+Reality (порт 8443/tcp) рядом с AmneziaWG: клиенты из `peers.json`, параметры в `/etc/vpn-xray.json` (реплицируются на резервный), ссылка для Happ в портале |
 | `scripts/make_qr.py` | Единый QR на портал (`out/qr-portal.png`) |
 | `deploy/` | Конфиги nginx, сервисов systemd (портал, vpn-peer-sync) и fail2ban |
 | `clients.csv` | Список конфигов: имя, IP в туннеле, публичный ключ (секретов нет) |

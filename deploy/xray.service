@@ -1,0 +1,20 @@
+[Unit]
+Description=Xray (VLESS+Reality)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=xray
+Group=xray
+Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

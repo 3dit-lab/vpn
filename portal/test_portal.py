@@ -483,6 +483,11 @@ def main():
     check("servers: разбор PORTAL_SERVERS",
           [x["key"] for x in p5.parse_servers("auto|vpn.x.ru|Авто;kz|kz-1.x.ru|Казахстан-1;bad|в ну|x")] == ["auto", "kz"])
     os.environ["PORTAL_SERVERS"] = "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1"
+    xst = Path(tempfile.mkdtemp()) / "vpn-xray.json"
+    SALT = "6f1c5a52-3f0e-4b53-9a8e-0d9f6b7a1c11"
+    xst.write_text(json.dumps({"private": "PRIV", "public": "PUBKEY", "short_id": "ab12cd34", "sni": "www.example.com",
+                               "port": 8443, "salt": SALT}))
+    os.environ["XRAY_STATE"] = str(xst)
     p6, d6 = load(slots=3)
     x6 = Ctx(p6)
     sc6 = x6.client()
@@ -500,6 +505,21 @@ def main():
     body = e6.get(f"/d/{slot6}/conf?srv=evil").get_data(as_text=True)
     check("servers: неизвестный сервер игнорируется", "Endpoint = x:51820" in body)
     check("servers: без параметра файл как есть", "Endpoint = x:51820" in e6.get(f"/d/{slot6}/conf").get_data(as_text=True))
+    # ---------- Xray (VLESS+Reality): ссылка для Happ, учёт трафика, генерация конфига
+    import uuid as _uuid
+    link = e6.get(f"/d/{slot6}/vless?srv=kz").get_data(as_text=True).strip()
+    want = str(_uuid.uuid5(_uuid.UUID(SALT), f"slot{slot6:03d}"))
+    check("xray: ссылка vless", link.startswith(f"vless://{want}@kz-1-vpn.3dit.ru:8443?")
+          and "security=reality" in link and "pbk=PUBKEY" in link and "sid=ab12cd34" in link and "flow=xtls-rprx-vision" in link, link)
+    check("xray: ссылка чужому слоту недоступна", sc6.get(f"/d/{slot6}/vless").status_code == 403
+          and e6.get("/d/99/vless").status_code == 404)
+    check("xray: кнопка на странице", "Ссылка для Happ" in e6.get("/").get_data(as_text=True))
+    (d6 / "traffic-xray-local.json").write_text(json.dumps({"version": 1, "peers": {f"xray:{slot6:03d}": {"rx": 7, "tx": 9}}}))
+    with p6.app.app_context():
+        check("xray: трафик слота прибавляется", p6.slot_traffic(slot6)[0] >= 7)
+    p6.XRAY_STATE = Path("/nonexistent")
+    check("xray: без настроек ссылки нет", p6.xray_state() is None)
+    os.environ.pop("XRAY_STATE", None)
     os.environ.pop("PORTAL_SERVERS", None)
 
     print(f"\nПроверок: {COUNT}, провалено: {len(FAILS)}")

@@ -5,6 +5,7 @@
   command="/opt/vpn-portal/replica-serve.py kz-1 pm-vpn.3dit.ru",restrict,from="5.180.40.128" ssh-ed25519 AAAA… vpn-replica
 Ключ умеет только две вещи (SSH_ORIGINAL_COMMAND):
   export          отдать tar.gz: база портала (согласованный снимок), конфиги, peers.json, /etc/vpn-portal.env, сертификат домена
+  import-traffic-xray  то же для счётчиков Xray (traffic-xray-<имя>.json)
   import-traffic  принять счётчики трафика резервного сервера из stdin в traffic-<имя>.json (портал суммирует по серверам)
 """
 import json
@@ -20,6 +21,7 @@ from pathlib import Path
 DATA = Path(os.environ.get("PORTAL_DATA", "/var/lib/vpn-portal"))
 LE = Path(os.environ.get("LE_DIR", "/etc/letsencrypt"))
 ENV_FILE = Path(os.environ.get("PORTAL_ENV", "/etc/vpn-portal.env"))
+XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 MAX_TRAFFIC = 8 * 1024 * 1024
 
 
@@ -45,20 +47,22 @@ def export(domain):
                 tar.add(DATA / "configs", arcname="var/lib/vpn-portal/configs")
             if ENV_FILE.is_file():
                 tar.add(ENV_FILE, arcname="etc/vpn-portal.env")
+            if XRAY_STATE.is_file():
+                tar.add(XRAY_STATE, arcname="etc/vpn-xray.json")
             for sub in ("live", "archive"):
                 d = LE / sub / domain
                 if d.is_dir():
                     tar.add(d, arcname=f"etc/letsencrypt/{sub}/{domain}")
 
 
-def import_traffic(peer):
+def import_traffic(peer, prefix="traffic"):
     raw = sys.stdin.buffer.read(MAX_TRAFFIC + 1)
     if len(raw) > MAX_TRAFFIC:
         sys.exit("слишком большой файл")
     data = json.loads(raw)
     if data.get("version") != 1 or not isinstance(data.get("peers"), dict):
         sys.exit("неизвестный формат")
-    dst = DATA / f"traffic-{peer}.json"
+    dst = DATA / f"{prefix}-{peer}.json"
     fd, tmp = tempfile.mkstemp(dir=DATA, prefix=".traffic-in.")
     with os.fdopen(fd, "w") as f:
         json.dump(data, f)
@@ -78,6 +82,8 @@ def main():
         export(sys.argv[2])
     elif cmd == "import-traffic":
         import_traffic(sys.argv[1])
+    elif cmd == "import-traffic-xray":
+        import_traffic(sys.argv[1], "traffic-xray")
     else:
         sys.exit("команда не разрешена")
 

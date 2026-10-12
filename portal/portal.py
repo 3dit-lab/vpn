@@ -41,9 +41,11 @@ import re
 import secrets
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
@@ -71,6 +73,7 @@ def parse_servers(raw):
 
 
 SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
+XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 DB_PATH = DATA_DIR / "portal.db"
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
@@ -282,6 +285,7 @@ TEMPLATES = {
     <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер.</small><br>{% endif %}
     <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
     <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скопировать конфиг</button>
+    {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
     <small class="copystate"></small>
   </div>
   {% else %}
@@ -309,6 +313,7 @@ TEMPLATES = {
   <div class="app" data-os="mac"><span>macOS</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
   <div class="app" data-os="linux"><span>Linux</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
   <p><small>На iPhone Amnezia VPN в российском App Store недоступен, поэтому используется DefaultVPN. На остальных системах ставится Amnezia VPN.</small></p>
+  {% if xray %}<p><small>Если VPN не подключается (например, в мобильной сети), используйте приложение <b>Happ</b>: нажмите «Ссылка для Happ», в Happ добавьте её из буфера обмена. Файлы Happ для Windows, macOS и Linux — на странице <a href="/apps/">приложений</a>, для телефонов — в App Store / Google Play.</small></p>{% endif %}
 </div>
 
 <div class="card">
@@ -339,6 +344,8 @@ TEMPLATES = {
       var dev = sel.closest(".dev"), u = "/d/" + sel.getAttribute("data-slot") + "/conf?srv=" + encodeURIComponent(sel.value);
       dev.querySelector("a.dl").setAttribute("href", u);
       dev.querySelector(".copy").setAttribute("data-url", u);
+      var xb = dev.querySelector(".copy[data-what]");
+      if (xb) xb.setAttribute("data-url", "/d/" + sel.getAttribute("data-slot") + "/vless?srv=" + encodeURIComponent(sel.value));
     });
   });
 {% endif %}
@@ -346,7 +353,7 @@ TEMPLATES = {
   for (var i = 0; i < btns.length; i++) {
     btns[i].addEventListener("click", function () {
       var b = this, st = b.parentNode.querySelector(".copystate");
-      function done(ok) { st.textContent = ok ? "Конфиг скопирован в буфер обмена." : "Не удалось скопировать, используйте «Скачать конфиг»."; }
+      function done(ok) { st.textContent = ok ? (b.getAttribute("data-what") || "Конфиг скопирован в буфер обмена.") : "Не удалось скопировать, используйте «Скачать конфиг»."; }
       fetch(b.getAttribute("data-url"), {credentials: "same-origin"}).then(function (r) { return r.text(); }).then(function (text) {
         if (navigator.clipboard && window.isSecureContext) {
           navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
@@ -813,7 +820,10 @@ def slot_traffic(slot, totals=None):
     info = peer_info(slot)
     if not info:
         return 0, 0
-    return (totals if totals is not None else traffic_totals()).get(info["public"], (0, 0))
+    totals = totals if totals is not None else traffic_totals()
+    rx, tx = totals.get(info["public"], (0, 0))
+    xrx, xtx = totals.get(f"xray:{slot:03d}", (0, 0))
+    return rx + xrx, tx + xtx
 
 
 def fmt_bytes(n):
@@ -1103,7 +1113,7 @@ def index():
                         (person["id"],)).fetchall()
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"])} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
-                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS)
+                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS, xray=bool(xray_state()))
 
 
 @app.route("/login", methods=["POST"])
@@ -1238,6 +1248,39 @@ def download(slot):
     return Response(body, mimetype="application/octet-stream", headers={
         "Content-Disposition": f'attachment; filename="3dit-vpn-{slot:03d}.conf"',
     })
+
+
+def xray_state():
+    """Параметры VLESS+Reality из /etc/vpn-xray.json (нет файла или он некорректен: Xray не используется)."""
+    try:
+        st = json.loads(XRAY_STATE.read_text())
+        uuid.UUID(st["salt"])
+        for k in ("public", "short_id", "sni", "port"):
+            if not st.get(k):
+                return None
+        return st
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+@app.route("/d/<int:slot>/vless")
+def download_vless(slot):
+    person = current_person()
+    if not person or not person["org_enabled"]:
+        return Response("Требуется вход", status=403, mimetype="text/plain")
+    st = xray_state()
+    if not st:
+        return Response("Не настроено", status=404, mimetype="text/plain")
+    row = db().execute("SELECT person_id FROM assignments WHERE slot=?", (slot,)).fetchone()
+    if not row or row["person_id"] != person["id"]:
+        return Response("Не найдено", status=404, mimetype="text/plain")
+    chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None) or (SERVERS[0] if SERVERS else None)
+    host = chosen["host"] if chosen else request.host.split(":")[0]
+    title = f"3dit-vpn-{slot:03d}" + (f" {chosen['title']}" if chosen else "")
+    link = (f"vless://{uuid.uuid5(uuid.UUID(st['salt']), f'slot{slot:03d}')}@{host}:{int(st['port'])}"
+            f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={st['sni']}&fp=chrome"
+            f"&pbk={st['public']}&sid={st['short_id']}&type=tcp#{quote(title)}")
+    return Response(link + "\n", mimetype="text/plain")
 
 
 @app.route("/captcha/<cid>.png")

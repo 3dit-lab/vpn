@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Скачивает последние ОФИЦИАЛЬНЫЕ релизы клиентов Amnezia с GitHub в каталог раздачи,
+# Скачивает последние ОФИЦИАЛЬНЫЕ релизы клиентов Amnezia и Happ с GitHub в каталог раздачи,
 # проверяет SHA256 (если GitHub отдаёт digest), пишет SHA256SUMS и обновляет /apps/index.html.
 # Файлы не изменяются и не пересобираются. Запускайте вручную, когда хотите обновить приложения:
 # автоматическое скачивание без проверки на сервере, раздающем файлы сотрудникам, не настроено намеренно.
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 APPS_DIR="${APPS_DIR:-/var/www/vpn/apps}"
-REPOS="${REPOS:-amnezia-vpn/amnezia-client}"
+REPOS="${REPOS:-amnezia-vpn/amnezia-client Happ-proxy/happ-desktop}"
 PATTERN='\.(exe|msi|dmg|pkg|apk|deb|rpm|AppImage|zip|tar\.(gz|zst|xz))$'
 
 for t in curl jq sha256sum; do
@@ -75,7 +75,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #8884;pa
 code{font-size:13px}
 </style></head><body>
 <h1>Приложения для VPN</h1>
-<p>Официальные сборки Amnezia без изменений. Для проверки целостности сравните SHA256 скачанного файла с файлом SHA256SUMS.</p>
+<p>Официальные сборки Amnezia и Happ без изменений. Для проверки целостности сравните SHA256 скачанного файла с файлом SHA256SUMS.</p>
 <p><b>iPhone / iPad:</b> файл приложения для iOS с этой страницы не раздаётся, приложение ставится из App Store (подробности на вашей личной странице).</p>
 $sections
 </body></html>

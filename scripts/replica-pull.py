@@ -106,6 +106,19 @@ def pull():
             os.chmod(tmpenv, 0o600)
             os.replace(tmpenv, envp)
             subprocess.run(["systemctl", "restart", "vpn-portal"], check=False)
+    xs = stage / "etc/vpn-xray.json"
+    if xs.exists():
+        xp = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
+        if not xp.exists() or xp.read_bytes() != xs.read_bytes():
+            shutil.copy2(xs, str(xp) + ".new")
+            os.chmod(str(xp) + ".new", 0o640)
+            try:
+                shutil.chown(str(xp) + ".new", group="vpnportal")
+            except (LookupError, PermissionError):
+                pass
+            os.replace(str(xp) + ".new", xp)
+            subprocess.run(["systemctl", "start", "vpn-xray-sync.service"], check=False)
+            log("параметры Xray обновлены")
     certs = stage / "etc/letsencrypt"
     if certs.is_dir():
         before = subprocess.run(["bash", "-c", "find /etc/letsencrypt/archive -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum"],
@@ -128,13 +141,14 @@ def pull():
 
 
 def push_traffic():
-    t = DATA / "traffic.json"
-    if not t.exists():
-        return
-    with open(t, "rb") as f:
-        r = subprocess.run(SSH + ["import-traffic"], stdin=f, stderr=subprocess.PIPE, timeout=60)
-    if r.returncode != 0:
-        log(f"трафик не отправлен: {r.stderr.decode(errors='replace').strip()[:200]}")
+    for name, cmd in (("traffic.json", "import-traffic"), ("traffic-xray-local.json", "import-traffic-xray")):
+        t = DATA / name
+        if not t.exists():
+            continue
+        with open(t, "rb") as f:
+            r = subprocess.run(SSH + [cmd], stdin=f, stderr=subprocess.PIPE, timeout=60)
+        if r.returncode != 0:
+            log(f"трафик ({name}) не отправлен: {r.stderr.decode(errors='replace').strip()[:200]}")
 
 
 def main():

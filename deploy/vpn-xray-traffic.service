@@ -1,0 +1,7 @@
+[Unit]
+Description=Collect per-user traffic counters of Xray
+After=xray.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-portal/collect-xray-traffic.py

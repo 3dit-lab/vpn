@@ -1,0 +1,7 @@
+[Unit]
+Description=Build Xray config from portal peers
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-portal/sync-xray.py
+ExecStartPost=-/bin/chgrp xray /usr/local/etc/xray/config.json
