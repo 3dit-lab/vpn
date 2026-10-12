@@ -2,12 +2,12 @@
 # Установка Xray (VLESS+Reality) рядом с AmneziaWG. Запуск от root из клона репозитория.
 #   основной сервер:  sudo bash scripts/setup-xray.sh
 #   резервный:        sudo XRAY_SECONDARY=1 bash scripts/setup-xray.sh   (параметры придут репликацией с основного)
-# Переменные: XRAY_PORT (8443), XRAY_SNI (www.microsoft.com), XRAY_VERSION (latest)
+# Переменные: XRAY_PORT (8443), XRAY_SNI (www.apple.com; www.microsoft.com не подходит: цепочка сертификатов слишком большая, рукопожатие Reality не завершается), XRAY_VERSION (latest)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY="$HERE/../deploy"
 PORT="${XRAY_PORT:-8443}"
-SNI="${XRAY_SNI:-www.microsoft.com}"
+SNI="${XRAY_SNI:-www.apple.com}"
 VER="${XRAY_VERSION:-latest}"
 STATE=/etc/vpn-xray.json
 [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
