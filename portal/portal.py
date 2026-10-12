@@ -1278,7 +1278,7 @@ def download_vless(slot):
     host = chosen["host"] if chosen else request.host.split(":")[0]
     title = f"3dit-vpn-{slot:03d}" + (f" {chosen['title']}" if chosen else "")
     link = (f"vless://{uuid.uuid5(uuid.UUID(st['salt']), f'slot{slot:03d}')}@{host}:{int(st['port'])}"
-            f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={st['sni']}&fp=chrome"
+            f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={st['sni']}&fp={st.get('fp') or 'ios'}"
             f"&pbk={st['public']}&sid={st['short_id']}&type=tcp#{quote(title)}")
     return Response(link + "\n", mimetype="text/plain")
 

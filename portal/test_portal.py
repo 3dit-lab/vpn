@@ -510,7 +510,7 @@ def main():
     link = e6.get(f"/d/{slot6}/vless?srv=kz").get_data(as_text=True).strip()
     want = str(_uuid.uuid5(_uuid.UUID(SALT), f"slot{slot6:03d}"))
     check("xray: ссылка vless", link.startswith(f"vless://{want}@kz-1-vpn.3dit.ru:8443?")
-          and "security=reality" in link and "pbk=PUBKEY" in link and "sid=ab12cd34" in link and "flow=xtls-rprx-vision" in link, link)
+          and "security=reality" in link and "pbk=PUBKEY" in link and "sid=ab12cd34" in link and "flow=xtls-rprx-vision" in link and "fp=ios" in link, link)
     check("xray: ссылка чужому слоту недоступна", sc6.get(f"/d/{slot6}/vless").status_code == 403
           and e6.get("/d/99/vless").status_code == 404)
     check("xray: кнопка на странице", "Ссылка для Happ" in e6.get("/").get_data(as_text=True))

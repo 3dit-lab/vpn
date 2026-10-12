@@ -46,7 +46,7 @@ if [ ! -f "$STATE" ] && [ -z "${XRAY_SECONDARY:-}" ]; then
 import json, secrets, sys, uuid
 priv, pub, sni, port = sys.argv[1:5]
 print(json.dumps({"private": priv, "public": pub, "short_id": secrets.token_hex(8), "sni": sni,
-                  "port": int(port), "salt": str(uuid.uuid4())}, indent=1))
+                  "port": int(port), "salt": str(uuid.uuid4()), "fp": "ios"}, indent=1))
 PY
   chown root:xray "$STATE.new"; chmod 640 "$STATE.new"; mv "$STATE.new" "$STATE"
   echo "созданы параметры Reality: $STATE"
