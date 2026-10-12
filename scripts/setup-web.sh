@@ -15,6 +15,7 @@
 set -euo pipefail
 
 DOMAIN="${DOMAIN:-pm-vpn.3dit.ru}"
+ALIASES="${ALIASES:-}"   # дополнительные имена через пробел, например: vpn.3dit.ru
 EMAIL="${EMAIL:-}"
 IGNOREIP="${IGNOREIP:-}"
 CONFIGS_SRC="${1:-}"
@@ -103,20 +104,26 @@ fi
 # ---- nginx: сначала HTTP для выпуска сертификата
 install -m 644 "$DEPLOY/nginx-proxy.inc" /etc/nginx/vpn-portal-proxy.inc
 CONF=/etc/nginx/conf.d/vpn.conf
-sed "s/__DOMAIN__/$DOMAIN/g" "$DEPLOY/nginx-http.conf" > "$CONF"
+sed "s/__DOMAIN__/$DOMAIN/g; s/__ALIASES__/$ALIASES/g" "$DEPLOY/nginx-http.conf" > "$CONF"
 nginx -t
 systemctl enable --now nginx
 systemctl reload nginx
 
-if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+DARGS=(-d "$DOMAIN"); for a in $ALIASES; do DARGS+=(-d "$a"); done
+NEED=0
+[ -d "/etc/letsencrypt/live/$DOMAIN" ] || NEED=1
+for a in $ALIASES; do
+  openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$a" || NEED=1
+done
+if [ "$NEED" = 1 ]; then
   if [ -n "$EMAIL" ]; then MAILARG=(-m "$EMAIL"); else MAILARG=(--register-unsafely-without-email); fi
-  certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos "${MAILARG[@]}"
+  certbot certonly --webroot -w /var/www/certbot "${DARGS[@]}" --expand --non-interactive --agree-tos "${MAILARG[@]}"
 fi
 install -d /etc/letsencrypt/renewal-hooks/deploy
 printf '#!/bin/sh\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 
-sed "s/__DOMAIN__/$DOMAIN/g" "$DEPLOY/nginx-https.conf" > "$CONF"
+sed "s/__DOMAIN__/$DOMAIN/g; s/__ALIASES__/$ALIASES/g" "$DEPLOY/nginx-https.conf" > "$CONF"
 nginx -t
 systemctl reload nginx
 

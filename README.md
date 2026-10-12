@@ -57,7 +57,7 @@ python3 scripts/make_qr.py  --url https://pm-vpn.3dit.ru/
 На сервер нужно скопировать репозиторий (`git clone`) и из архива каталоги `server/` и `clients/`.
 
 1. VPN: `sudo ./scripts/install-server.sh server/awg0.conf`. Порт **51820/udp** должен быть доступен снаружи.
-2. Портал: `sudo DOMAIN=pm-vpn.3dit.ru EMAIL=<почта> IGNOREIP="<ваш офисный IP>" ./scripts/setup-web.sh clients`.
+2. Портал: `sudo DOMAIN=pm-vpn.3dit.ru ALIASES="vpn.3dit.ru" EMAIL=<почта> IGNOREIP="<ваш офисный IP>" ./scripts/setup-web.sh clients`.
    Нужны открытые порты **80 и 443 (TCP)** и A-запись домена на сервер. Скрипт ставит пакеты (nginx, certbot, Flask,
    gunicorn, fail2ban), запускает портал (`vpn-portal`) и службу синхронизации пиров (`vpn-peer-sync`), получает
    сертификат, включает fail2ban, скачивает приложения. **В конце он выводит пароль общего администратора: запишите его**
