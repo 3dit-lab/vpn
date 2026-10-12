@@ -8,6 +8,7 @@
 Конфиг: /etc/vpn-dnsd.json (пример в deploy/vpn-dnsd.json.example). Нужен пакет python3-dnslib.
 """
 import json
+import random
 import socket
 import sys
 import threading
@@ -109,7 +110,9 @@ class Resolver(BaseResolver):
             reply.add_auth(self.soa())
             return reply
         if qtype == "A":
-            for ip in alive_ips():
+            ips = alive_ips()
+            random.shuffle(ips)  # равномерно распределяет новые подключения между живыми серверами
+            for ip in ips:
                 reply.add_answer(RR(ZONE, QTYPE.A, ttl=TTL, rdata=A(ip)))
         elif qtype == "NS":
             for n in NS_NAMES:

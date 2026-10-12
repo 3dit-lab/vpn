@@ -8,6 +8,10 @@
 # /путь/к/clients: каталог с файлами client001.conf, client002.conf … (из архива, каталог clients/).
 # Необязательные переменные:
 #   SUPERADMIN_PASSWORD  пароль общего администратора (/super), не короче 8 символов (по умолчанию случайный)
+#   ALIASES         дополнительные имена сервера через пробел
+#   PEER_IPS        IP резервных серверов портала (через пробел), если портал работает на нескольких серверах
+#   PORTAL_SERVERS  выбор сервера при выдаче конфига, например:
+#                   "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1"
 #   IGNOREIP        адреса через пробел, которые fail2ban никогда не банит (например, офисный IP)
 # Требования: домен указывает на этот сервер, порты 80 и 443 (TCP) открыты снаружи.
 # Организации, коды доступа и лимиты создаются в веб-интерфейсе общего администратора (/super).
@@ -18,6 +22,8 @@ DOMAIN="${DOMAIN:-pm-vpn.3dit.ru}"
 ALIASES="${ALIASES:-}"   # дополнительные имена через пробел, например: vpn.3dit.ru
 EMAIL="${EMAIL:-}"
 IGNOREIP="${IGNOREIP:-}"
+PEER_IPS="${PEER_IPS:-}"                 # IP резервных серверов портала: им доверяем X-Real-IP (реальный адрес клиента)
+PORTAL_SERVERS="${PORTAL_SERVERS:-}"     # варианты сервера при выдаче конфига: ключ|имя хоста|название;...
 CONFIGS_SRC="${1:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY="$HERE/../deploy"
@@ -53,6 +59,7 @@ install -m 644 "$PORTAL_DIR/backup.py" /opt/vpn-portal/backup.py
 install -m 755 "$HERE/sync-peers.py" /opt/vpn-portal/sync-peers.py
 install -m 755 "$HERE/collect-traffic.py" /opt/vpn-portal/collect-traffic.py
 install -m 755 "$HERE/restore-backup.py" /opt/vpn-portal/restore-backup.py
+[ ! -f "$HERE/replica-serve.py" ] || install -m 755 "$HERE/replica-serve.py" /opt/vpn-portal/replica-serve.py
 install -d -o vpnportal -g vpnportal -m 700 "$DATA" "$DATA/configs"
 for f in "$CONFIGS_SRC"/client*.conf; do
   # существующие файлы не трогаем: после освобождения конфига в них уже другие (заменённые) ключи
@@ -71,6 +78,11 @@ if [ ! -f "$ENV_FILE" ]; then
   NEW_ENV=1
 fi
 chmod 600 "$ENV_FILE"
+if [ -n "$PORTAL_SERVERS" ]; then
+  [[ "$PORTAL_SERVERS" != *'"'* && "$PORTAL_SERVERS" != *'$'* && "$PORTAL_SERVERS" != *'`'* && "$PORTAL_SERVERS" != *'\\'* ]] || { echo "PORTAL_SERVERS: недопустимые символы"; exit 1; }
+  sed -i '/^PORTAL_SERVERS=/d' "$ENV_FILE"
+  printf 'PORTAL_SERVERS="%s"\n' "$PORTAL_SERVERS" >> "$ENV_FILE"
+fi
 
 # ---- синхронизация пиров AmneziaWG с порталом (отключение организаций и освобождение ключей действуют на VPN)
 install -m 644 "$DEPLOY/vpn-peer-sync.service" /etc/systemd/system/vpn-peer-sync.service
@@ -103,6 +115,9 @@ fi
 
 # ---- nginx: сначала HTTP для выпуска сертификата
 install -m 644 "$DEPLOY/nginx-proxy.inc" /etc/nginx/vpn-portal-proxy.inc
+{ echo "# реальный адрес клиента от резервных серверов портала (создаёт setup-web.sh, PEER_IPS)"
+  for ip in $PEER_IPS; do echo "set_real_ip_from $ip;"; done
+  [ -z "$PEER_IPS" ] || echo "real_ip_header X-Real-IP;"; } > /etc/nginx/vpn-portal-realip.inc
 CONF=/etc/nginx/conf.d/vpn.conf
 sed "s/__DOMAIN__/$DOMAIN/g; s/__ALIASES__/$ALIASES/g" "$DEPLOY/nginx-http.conf" > "$CONF"
 nginx -t

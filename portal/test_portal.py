@@ -469,6 +469,39 @@ def main():
     p4b = importlib.reload(p4)  # повторная инициализация не ломает данные
     check("migrate: идемпотентно", Ctx(p4b).slots() == [3])
 
+    # ---------- несколько серверов: трафик суммируется, при выдаче можно выбрать сервер
+    p5, d5 = load(slots=3)
+    x5 = Ctx(p5)
+    GB = 1024 ** 3
+    with p5.app.app_context():
+        pubx = p5.peer_info(1)["public"]
+    (d5 / "traffic.json").write_text(json.dumps({"version": 1, "peers": {pubx: {"rx": GB, "tx": 0}}}))
+    (d5 / "traffic-kz-1.json").write_text(json.dumps({"version": 1, "peers": {pubx: {"rx": 2 * GB, "tx": 5}}}))
+    check("servers: трафик суммируется по серверам", p5.traffic_totals().get(pubx) == (3 * GB, 5))
+    (d5 / "traffic-kz-1.json").write_text("не json")
+    check("servers: битый файл соседа не ломает учёт", p5.traffic_totals().get(pubx) == (GB, 0))
+    check("servers: разбор PORTAL_SERVERS",
+          [x["key"] for x in p5.parse_servers("auto|vpn.x.ru|Авто;kz|kz-1.x.ru|Казахстан-1;bad|в ну|x")] == ["auto", "kz"])
+    os.environ["PORTAL_SERVERS"] = "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1"
+    p6, d6 = load(slots=3)
+    x6 = Ctx(p6)
+    sc6 = x6.client()
+    x6.super_login(sc6)
+    create_org(x6, sc6, "Гамма", "gamma", limit="3", code="77777")
+    e6 = x6.client()
+    html = x6.emp_login(e6, "77777", phone="+79001112233", name="Тест Тестов").get_data(as_text=True)
+    e6.post("/claim", data={"csrf": x6.csrf(e6), "label": ""})
+    html = e6.get("/").get_data(as_text=True)
+    check("servers: на странице выбор сервера", "Финляндия-1" in html and "Казахстан-1" in html and "?srv=auto" in html)
+    slot6 = x6.slots("+79001112233")[0]
+    for key, host in (("auto", "vpn.3dit.ru"), ("fi", "fi-1-vpn.3dit.ru"), ("kz", "kz-1-vpn.3dit.ru")):
+        body = e6.get(f"/d/{slot6}/conf?srv={key}").get_data(as_text=True)
+        check(f"servers: Endpoint для {key}", f"Endpoint = {host}:51820" in body and body.count("Endpoint") == 1)
+    body = e6.get(f"/d/{slot6}/conf?srv=evil").get_data(as_text=True)
+    check("servers: неизвестный сервер игнорируется", "Endpoint = x:51820" in body)
+    check("servers: без параметра файл как есть", "Endpoint = x:51820" in e6.get(f"/d/{slot6}/conf").get_data(as_text=True))
+    os.environ.pop("PORTAL_SERVERS", None)
+
     print(f"\nПроверок: {COUNT}, провалено: {len(FAILS)}")
     if FAILS:
         print("\n".join(" - " + f for f in FAILS))

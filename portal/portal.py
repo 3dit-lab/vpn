@@ -58,6 +58,19 @@ DATA_DIR = Path(os.environ.get("PORTAL_DATA", "/var/lib/vpn-portal"))
 CONF_DIR = Path(os.environ.get("PORTAL_CONFIGS", str(DATA_DIR / "configs")))
 TRAFFIC_FILE = Path(os.environ.get("PORTAL_TRAFFIC", str(DATA_DIR / "traffic.json")))
 PEERS_FILE = Path(os.environ.get("PORTAL_PEERS", str(DATA_DIR / "peers.json")))
+
+
+def parse_servers(raw):
+    """PORTAL_SERVERS="auto|vpn.3dit.ru|Авто;fi|fi-1-vpn.3dit.ru|Финляндия-1": варианты Endpoint при выдаче конфига."""
+    out = []
+    for part in (raw or "").split(";"):
+        bits = [b.strip() for b in part.split("|")]
+        if len(bits) == 3 and re.fullmatch(r"[a-z0-9]{1,12}", bits[0]) and re.fullmatch(r"[A-Za-z0-9.-]{1,100}", bits[1]) and bits[2]:
+            out.append({"key": bits[0], "host": bits[1], "title": bits[2][:40]})
+    return out
+
+
+SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
 DB_PATH = DATA_DIR / "portal.db"
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
@@ -264,8 +277,11 @@ TEMPLATES = {
   <div class="dev">
     <b>Устройство {{ loop.index }}</b>{% if d.label %} · {{ d.label }}{% endif %}<br>
     <small>Конфиг №{{ '%03d' % d.slot }} · выдан {{ d.at }}</small>
-    <a class="btn primary" href="/d/{{ d.slot }}/conf">Скачать конфиг</a>
-    <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf">Скопировать конфиг</button>
+    {% if servers %}<br><label>Сервер
+      <select class="srv" data-slot="{{ d.slot }}">{% for sv in servers %}<option value="{{ sv.key }}">{{ sv.title }}</option>{% endfor %}</select></label>
+    <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер.</small><br>{% endif %}
+    <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
+    <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скопировать конфиг</button>
     <small class="copystate"></small>
   </div>
   {% else %}
@@ -317,6 +333,15 @@ TEMPLATES = {
   else if (/Linux|X11/.test(ua)) id = "linux";
   var me = document.querySelector('[data-os="' + id + '"]');
   if (me) me.className += " me";
+{% if servers %}
+  document.querySelectorAll("select.srv").forEach(function (sel) {
+    sel.addEventListener("change", function () {
+      var dev = sel.closest(".dev"), u = "/d/" + sel.getAttribute("data-slot") + "/conf?srv=" + encodeURIComponent(sel.value);
+      dev.querySelector("a.dl").setAttribute("href", u);
+      dev.querySelector(".copy").setAttribute("data-url", u);
+    });
+  });
+{% endif %}
   var btns = document.querySelectorAll(".copy");
   for (var i = 0; i < btns.length; i++) {
     btns[i].addEventListener("click", function () {
@@ -748,19 +773,37 @@ def write_peers(c):
 _traffic_cache = {"stamp": None, "data": {}}
 
 
-def traffic_totals():
-    """Накопленный трафик по публичным ключам из traffic.json (его ведёт служба vpn-traffic от root)."""
+def traffic_files():
+    """Свой traffic.json и файлы traffic-<сервер>.json, которые присылают другие серверы."""
+    files = [TRAFFIC_FILE]
     try:
-        st = TRAFFIC_FILE.stat()
+        files += sorted(TRAFFIC_FILE.parent.glob(TRAFFIC_FILE.stem + "-*.json"))
     except OSError:
-        return {}
-    stamp = (st.st_mtime_ns, st.st_size)
-    if _traffic_cache["stamp"] != stamp:
+        pass
+    return files
+
+
+def traffic_totals():
+    """Накопленный трафик по публичным ключам: сумма по всем серверам (traffic.json ведёт служба vpn-traffic от root)."""
+    stamp = []
+    for f in traffic_files():
         try:
-            raw = json.loads(TRAFFIC_FILE.read_text()).get("peers", {})
-            data = {k: (int(v.get("rx", 0)), int(v.get("tx", 0))) for k, v in raw.items() if isinstance(v, dict)}
-        except (OSError, ValueError, AttributeError, TypeError):
-            data = {}
+            st = f.stat()
+            stamp.append((f.name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    stamp = tuple(stamp)
+    if _traffic_cache["stamp"] != stamp:
+        data = {}
+        for f in traffic_files():
+            try:
+                raw = json.loads(f.read_text()).get("peers", {})
+                for k, v in raw.items():
+                    if isinstance(v, dict):
+                        rx, tx = data.get(k, (0, 0))
+                        data[k] = (rx + int(v.get("rx", 0)), tx + int(v.get("tx", 0)))
+            except (OSError, ValueError, AttributeError, TypeError):
+                continue
         _traffic_cache.update(stamp=stamp, data=data)
     return _traffic_cache["data"]
 
@@ -1060,7 +1103,7 @@ def index():
                         (person["id"],)).fetchall()
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"])} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
-                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"])
+                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS)
 
 
 @app.route("/login", methods=["POST"])
@@ -1187,7 +1230,12 @@ def download(slot):
     if not path.is_file():
         return Response("Файл конфига не найден, сообщите администратору", status=500, mimetype="text/plain")
     c.execute("UPDATE assignments SET downloads=downloads+1, last_download_at=? WHERE slot=?", (now(), slot))
-    return Response(path.read_bytes(), mimetype="application/octet-stream", headers={
+    body = path.read_bytes()
+    chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None)
+    if chosen:
+        body = re.sub(rb"(?m)^(Endpoint\s*=\s*)[^:\s]+(:\d+)\s*$",
+                      lambda m: m.group(1) + chosen["host"].encode() + m.group(2), body)
+    return Response(body, mimetype="application/octet-stream", headers={
         "Content-Disposition": f'attachment; filename="3dit-vpn-{slot:03d}.conf"',
     })
 

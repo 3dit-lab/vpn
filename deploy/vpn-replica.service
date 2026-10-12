@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull portal data from the primary VPN server and push local traffic counters
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-portal/replica-pull.py
+TimeoutStartSec=300
