@@ -1,0 +1,14 @@
+{
+  "zone": "vpn.3dit.ru",
+  "listen": "194.77.71.148",
+  "port": 53,
+  "ttl": 30,
+  "interval": 5,
+  "fails": 2,
+  "rate_per_sec": 100,
+  "ns": ["fi-1-vpn.3dit.ru", "fi-2-vpn.3dit.ru"],
+  "servers": [
+    {"name": "fi-1", "ip": "194.77.71.148", "port": 443},
+    {"name": "fi-2", "ip": "45.149.114.53", "port": 443}
+  ]
+}

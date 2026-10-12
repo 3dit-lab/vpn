@@ -85,7 +85,9 @@ def main():
     ap.add_argument("--mtu", type=int, default=1280)
     ap.add_argument("--keepalive", type=int, default=25)
     ap.add_argument("--allowed-ips", default=str(ROOT / "allowed-ips.txt"))
-    ap.add_argument("--dns", default="", help="необязательно: DNS для клиентов (по умолчанию не задаётся)")
+    ap.add_argument("--dns", default="",
+                    help="необязательно: DNS для клиентов, через запятую (например 10.8.0.1). "
+                         "Адреса автоматически добавляются в AllowedIPs, чтобы запросы шли через туннель")
     ap.add_argument("--state", default=str(ROOT / "secrets" / "state.json"))
     ap.add_argument("--out", default=str(ROOT / "out"))
     args = ap.parse_args()
@@ -121,6 +123,11 @@ def main():
     os.chmod(state_path, 0o600)
 
     allowed = load_allowed_ips(Path(args.allowed_ips))
+    if args.dns:
+        for d in (x.strip() for x in args.dns.split(",") if x.strip()):
+            addr = ipaddress.ip_address(d)
+            if not any(addr in ipaddress.ip_network(n) for n in allowed):
+                allowed.append(f"{addr}/32")
     allowed_str = ", ".join(allowed)
     obf = state["obfuscation"]
 

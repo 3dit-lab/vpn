@@ -13,7 +13,15 @@ PORT="$(awk -F' *= *' '/^ListenPort/{print $2}' "$CONF_SRC")"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y software-properties-common iptables "linux-headers-$(uname -r)"
+apt-get install -y software-properties-common iptables
+# заголовки ядра нужны для сборки модуля; если для запущенного ядра их уже нет в архиве,
+# ставим актуальное ядро и просим перезагрузиться
+if ! apt-get install -y "linux-headers-$(uname -r)"; then
+  echo "Заголовки для ядра $(uname -r) недоступны: ставлю актуальное ядро linux-generic."
+  apt-get install -y linux-generic
+  echo "Перезагрузите сервер (reboot) и запустите этот скрипт ещё раз."
+  exit 2
+fi
 add-apt-repository -y ppa:amnezia/ppa
 apt-get update -y
 apt-get install -y amneziawg amneziawg-tools

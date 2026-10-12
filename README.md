@@ -149,3 +149,13 @@ tar cz secrets/state.json | age -r <публичный ключ из age-key.txt
 
 Windows, macOS, Linux и Android: Amnezia VPN. iPhone: Amnezia VPN в российском App Store недоступен, используется
 DefaultVPN. Импорт файла и работу конфига в каждом приложении нужно проверить на реальном устройстве до массовой выдачи.
+
+## DNS-роль и имя vpn.3dit.ru (несколько серверов)
+
+- Клиентский DNS внутри туннеля: `unbound` на каждом сервере слушает только `10.8.0.1` (адрес сервера в VPN) и
+  отвечает только подсети `10.8.0.0/23`. В конфиги добавляются `DNS = 10.8.0.1` и `10.8.0.1/32` в `AllowedIPs`
+  (`generate.py --dns 10.8.0.1`; для уже выданных конфигов: `scripts/update-configs.py`, ключи не меняются).
+- Зона `vpn.3dit.ru` делегирована двум серверам (NS-записи `fi-1-vpn`, `fi-2-vpn`). `scripts/vpn-dnsd.py`
+  проверяет TCP/443 каждого сервера и отдаёт в A-ответе только живые (TTL 30 с). Если не отвечает никто, отдаёт все.
+- Установка на сервере: `PUBLIC_IP=<ip> ./scripts/install-dns.sh`, затем вручную в ufw:
+  `ufw allow in on awg0 to any port 53`, `ufw allow 53/udp`, `ufw allow 53/tcp`.
