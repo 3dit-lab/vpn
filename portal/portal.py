@@ -74,6 +74,7 @@ def parse_servers(raw):
 
 SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
+XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1"  # кнопка «Ссылка для Happ»: пока выключена, включается PORTAL_XRAY_UI=1
 DB_PATH = DATA_DIR / "portal.db"
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
@@ -1113,7 +1114,7 @@ def index():
                         (person["id"],)).fetchall()
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"])} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
-                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS, xray=bool(xray_state()))
+                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS, xray=XRAY_UI and bool(xray_state()))
 
 
 @app.route("/login", methods=["POST"])
@@ -1268,7 +1269,7 @@ def download_vless(slot):
     person = current_person()
     if not person or not person["org_enabled"]:
         return Response("Требуется вход", status=403, mimetype="text/plain")
-    st = xray_state()
+    st = xray_state() if XRAY_UI else None
     if not st:
         return Response("Не настроено", status=404, mimetype="text/plain")
     row = db().execute("SELECT person_id FROM assignments WHERE slot=?", (slot,)).fetchone()

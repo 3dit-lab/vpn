@@ -488,6 +488,7 @@ def main():
     xst.write_text(json.dumps({"private": "PRIV", "public": "PUBKEY", "short_id": "ab12cd34", "sni": "www.example.com",
                                "port": 8443, "salt": SALT}))
     os.environ["XRAY_STATE"] = str(xst)
+    os.environ["PORTAL_XRAY_UI"] = "1"
     p6, d6 = load(slots=3)
     x6 = Ctx(p6)
     sc6 = x6.client()
@@ -520,6 +521,7 @@ def main():
     p6.XRAY_STATE = Path("/nonexistent")
     check("xray: без настроек ссылки нет", p6.xray_state() is None)
     os.environ.pop("XRAY_STATE", None)
+    os.environ.pop("PORTAL_XRAY_UI", None)
     os.environ.pop("PORTAL_SERVERS", None)
 
     print(f"\nПроверок: {COUNT}, провалено: {len(FAILS)}")
