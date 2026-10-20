@@ -529,6 +529,33 @@ def main():
     os.environ.pop("PORTAL_XRAY_UI", None)
     os.environ.pop("PORTAL_SERVERS", None)
 
+    # ---------- чётность слотов сервера (чёт/нечёт между основным и резервным)
+    p7, d7 = load(slots=8)
+    x7 = Ctx(p7)
+    sc7 = x7.client()
+    x7.super_login(sc7)
+    create_org(x7, sc7, "Гамма", "gamma", "6", "33333")
+    pf = d7 / "parity"
+    os.environ["PORTAL_SLOT_PARITY"] = str(pf)
+    check("parity: файла нет -> любые", p7.slot_parity() is None)
+    for word, par in (("even", 0), ("odd", 1)):
+        pf.write_text(word + "\n")
+        check(f"parity: {word}", p7.slot_parity() == par)
+        e7 = x7.client()
+        x7.emp_login(e7, "33333", phone="8900000000" + str(par), name="Тест Тестов")
+        for _ in range(3):
+            x7.claim(e7)
+        got = x7.slots("+7900000000" + str(par))
+        check(f"parity: {word} выданы только {word} слоты", len(got) == 3 and all(s % 2 == par for s in got), str(got))
+    pf.write_text("even\n")
+    e8 = x7.client()
+    x7.emp_login(e8, "33333", phone="89000000009", name="Ещё Один")
+    for _ in range(3):
+        x7.claim(e8)
+    got = x7.slots("+79000000009")
+    check("parity: чётные закончились - нечётные не выдаются", got == [8], str(got))
+    os.environ.pop("PORTAL_SLOT_PARITY", None)
+
     print(f"\nПроверок: {COUNT}, провалено: {len(FAILS)}")
     if FAILS:
         print("\n".join(" - " + f for f in FAILS))

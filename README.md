@@ -150,6 +150,10 @@ tar cz secrets/state.json | age -r <публичный ключ из age-key.txt
 `python3 scripts/update-configs.py --dir /var/lib/vpn-portal/configs --allowed-ips allowed-ips.txt` (сначала с `--dry-run`).
 Адреса сервиса по доменам: `python3 scripts/resolve-domains.py wetransfer.com we.tl --rounds 10 --prefix 24`.
 
+Чёт/нечёт между серверами: каждый сервер выдаёт только слоты своей чётности, чтобы при рассинхроне базы они не
+пересеклись. Чётность задаёт локальный файл `/etc/vpn-slot-parity` (`odd` или `even`, не реплицируется): FI-1 — `odd`,
+KZ-1 — `even`. Нет файла — выдаются любые слоты. Пул 500: по 250 на сервер.
+
 Вариант «весь трафик»: в `PORTAL_SERVERS` четвёртое поле `full`
 (`all|vpn.3dit.ru|Авто, весь трафик|full`), в скачанном конфиге `AllowedIPs = 0.0.0.0/0, ::/0`.
 

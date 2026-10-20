@@ -703,6 +703,17 @@ def close_db(_exc):
 SLOT_RE = re.compile(r"^client(\d{3,})\.conf$")
 
 
+def slot_parity():
+    """Чётность слотов, которые выдаёт ЭТОТ сервер: 0 (чётные), 1 (нечётные) или None (любые).
+    Читается из локального файла PORTAL_SLOT_PARITY (/etc/vpn-slot-parity: odd|even), он не реплицируется:
+    у каждого сервера свой. Так основной и резервный не выдадут один и тот же слот даже при рассинхроне."""
+    try:
+        v = Path(os.environ.get("PORTAL_SLOT_PARITY", "/etc/vpn-slot-parity")).read_text().strip().lower()
+    except OSError:
+        return None
+    return {"odd": 1, "even": 0}.get(v)
+
+
 def all_slots():
     if not CONF_DIR.is_dir():
         return []
@@ -1196,7 +1207,8 @@ def claim():
         used = c.execute("SELECT COUNT(*) FROM assignments a JOIN people p ON p.id=a.person_id WHERE p.org_id=?",
                          (person["org_id"],)).fetchone()[0]
         taken = {r[0] for r in c.execute("SELECT slot FROM assignments")}
-        free = [s for s in all_slots() if s not in taken]
+        par = slot_parity()
+        free = [s for s in all_slots() if s not in taken and (par is None or s % 2 == par)]
         problem = None
         if not org or not org["enabled"]:
             problem = "Доступ для вашей организации отключён."
