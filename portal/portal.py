@@ -63,12 +63,13 @@ PEERS_FILE = Path(os.environ.get("PORTAL_PEERS", str(DATA_DIR / "peers.json")))
 
 
 def parse_servers(raw):
-    """PORTAL_SERVERS="auto|vpn.3dit.ru|Авто;fi|fi-1-vpn.3dit.ru|Финляндия-1": варианты Endpoint при выдаче конфига."""
+    """PORTAL_SERVERS="auto|vpn.3dit.ru|Авто;fi|fi-1-vpn.3dit.ru|Финляндия-1;all|vpn.3dit.ru|Авто, весь трафик|full":
+    варианты Endpoint при выдаче конфига; четвёртое поле full: весь трафик через VPN (AllowedIPs = 0.0.0.0/0, ::/0)."""
     out = []
     for part in (raw or "").split(";"):
         bits = [b.strip() for b in part.split("|")]
-        if len(bits) == 3 and re.fullmatch(r"[a-z0-9]{1,12}", bits[0]) and re.fullmatch(r"[A-Za-z0-9.-]{1,100}", bits[1]) and bits[2]:
-            out.append({"key": bits[0], "host": bits[1], "title": bits[2][:40]})
+        if len(bits) in (3, 4) and re.fullmatch(r"[a-z0-9]{1,12}", bits[0]) and re.fullmatch(r"[A-Za-z0-9.-]{1,100}", bits[1]) and bits[2]:
+            out.append({"key": bits[0], "host": bits[1], "title": bits[2][:40], "full": len(bits) == 4 and bits[3] == "full"})
     return out
 
 
@@ -283,7 +284,7 @@ TEMPLATES = {
     <small>Конфиг №{{ '%03d' % d.slot }} · выдан {{ d.at }}</small>
     {% if servers %}<br><label>Сервер
       <select class="srv" data-slot="{{ d.slot }}">{% for sv in servers %}<option value="{{ sv.key }}">{{ sv.title }}</option>{% endfor %}</select></label>
-    <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер.</small><br>{% endif %}
+    <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер. Вариант «весь трафик» пускает через VPN весь интернет устройства, без разделения.</small><br>{% endif %}
     <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
     <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скопировать конфиг</button>
     {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
@@ -1243,11 +1244,15 @@ def download(slot):
     c.execute("UPDATE assignments SET downloads=downloads+1, last_download_at=? WHERE slot=?", (now(), slot))
     body = path.read_bytes()
     chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None)
+    suffix = ""
     if chosen:
         body = re.sub(rb"(?m)^(Endpoint\s*=\s*)[^:\s]+(:\d+)\s*$",
                       lambda m: m.group(1) + chosen["host"].encode() + m.group(2), body)
+        if chosen.get("full"):
+            body = re.sub(rb"(?m)^AllowedIPs\s*=.*$", b"AllowedIPs = 0.0.0.0/0, ::/0", body)
+            suffix = f"-{chosen['key']}"
     return Response(body, mimetype="application/octet-stream", headers={
-        "Content-Disposition": f'attachment; filename="3dit-vpn-{slot:03d}.conf"',
+        "Content-Disposition": f'attachment; filename="3dit-vpn-{slot:03d}{suffix}.conf"',
     })
 
 

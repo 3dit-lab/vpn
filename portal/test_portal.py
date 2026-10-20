@@ -482,7 +482,7 @@ def main():
     check("servers: битый файл соседа не ломает учёт", p5.traffic_totals().get(pubx) == (GB, 0))
     check("servers: разбор PORTAL_SERVERS",
           [x["key"] for x in p5.parse_servers("auto|vpn.x.ru|Авто;kz|kz-1.x.ru|Казахстан-1;bad|в ну|x")] == ["auto", "kz"])
-    os.environ["PORTAL_SERVERS"] = "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1"
+    os.environ["PORTAL_SERVERS"] = "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1;all|vpn.3dit.ru|Авто, весь трафик|full"
     xst = Path(tempfile.mkdtemp()) / "vpn-xray.json"
     SALT = "6f1c5a52-3f0e-4b53-9a8e-0d9f6b7a1c11"
     xst.write_text(json.dumps({"private": "PRIV", "public": "PUBKEY", "short_id": "ab12cd34", "sni": "www.example.com",
@@ -503,6 +503,11 @@ def main():
     for key, host in (("auto", "vpn.3dit.ru"), ("fi", "fi-1-vpn.3dit.ru"), ("kz", "kz-1-vpn.3dit.ru")):
         body = e6.get(f"/d/{slot6}/conf?srv={key}").get_data(as_text=True)
         check(f"servers: Endpoint для {key}", f"Endpoint = {host}:51820" in body and body.count("Endpoint") == 1)
+    r_all = e6.get(f"/d/{slot6}/conf?srv=all")
+    b_all = r_all.get_data(as_text=True)
+    check("servers: вариант «весь трафик»", "Endpoint = vpn.3dit.ru:51820" in b_all and "AllowedIPs = 0.0.0.0/0, ::/0" in b_all
+          and b_all.count("AllowedIPs") == 1 and f"{slot6:03d}-all.conf" in r_all.headers["Content-Disposition"])
+    check("servers: обычный вариант без полного туннеля", "0.0.0.0/0" not in e6.get(f"/d/{slot6}/conf?srv=fi").get_data(as_text=True))
     body = e6.get(f"/d/{slot6}/conf?srv=evil").get_data(as_text=True)
     check("servers: неизвестный сервер игнорируется", "Endpoint = x:51820" in body)
     check("servers: без параметра файл как есть", "Endpoint = x:51820" in e6.get(f"/d/{slot6}/conf").get_data(as_text=True))
