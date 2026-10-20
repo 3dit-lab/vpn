@@ -146,6 +146,13 @@ tar cz secrets/state.json | age -r <публичный ключ из age-key.txt
 меняется, но клиентам нужно скачать конфиг заново (кнопка «Скачать конфиг» на портале) и импортировать его: список
 подсетей вшит в клиентский файл.
 
+Обновить уже выданные конфиги пула без перегенерации ключей:
+`python3 scripts/update-configs.py --dir /var/lib/vpn-portal/configs --allowed-ips allowed-ips.txt` (сначала с `--dry-run`).
+Адреса сервиса по доменам: `python3 scripts/resolve-domains.py wetransfer.com we.tl --rounds 10 --prefix 24`.
+
+Вариант «весь трафик»: в `PORTAL_SERVERS` четвёртое поле `full`
+(`all|vpn.3dit.ru|Авто, весь трафик|full`), в скачанном конфиге `AllowedIPs = 0.0.0.0/0, ::/0`.
+
 ## Клиентские приложения
 
 Windows, macOS, Linux и Android: Amnezia VPN. iPhone: Amnezia VPN в российском App Store недоступен, используется
