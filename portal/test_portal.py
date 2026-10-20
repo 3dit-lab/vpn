@@ -534,7 +534,7 @@ def main():
     x7 = Ctx(p7)
     sc7 = x7.client()
     x7.super_login(sc7)
-    create_org(x7, sc7, "Гамма", "gamma", "6", "33333")
+    create_org(x7, sc7, "Гамма", "gamma", "20", "33333")
     pf = d7 / "parity"
     os.environ["PORTAL_SLOT_PARITY"] = str(pf)
     check("parity: файла нет -> любые", p7.slot_parity() is None)
