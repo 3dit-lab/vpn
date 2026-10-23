@@ -24,7 +24,7 @@ TTL = int(cfg.get("ttl", 30))
 SERVERS = cfg["servers"]            # [{"name","ip","port":443}]
 NS_NAMES = cfg["ns"]
 INTERVAL = float(cfg.get("interval", 5))
-FAILS = int(cfg.get("fails", 2))
+FAILS = int(cfg.get("fails", 4))
 RATE = float(cfg.get("rate_per_sec", 100))
 
 state = {s["ip"]: True for s in SERVERS}
@@ -59,9 +59,13 @@ def health_loop():
 
 
 def alive_ips():
+    """Живые основные серверы; резервные ("backup": true) отдаются, только если ни один основной не жив."""
     with lock:
-        ips = [s["ip"] for s in SERVERS if state[s["ip"]]]
-    return ips or [s["ip"] for s in SERVERS]
+        alive = [s for s in SERVERS if state[s["ip"]]]
+    main = [s["ip"] for s in alive if not s.get("backup")]
+    if main:
+        return main
+    return [s["ip"] for s in alive] or [s["ip"] for s in SERVERS]
 
 
 class Bucket:
