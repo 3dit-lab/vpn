@@ -1,0 +1,23 @@
+[Unit]
+Description=PM-VPN etcd quorum member
+Requires=wg-quick@vpn-cluster.service
+After=wg-quick@vpn-cluster.service
+
+[Service]
+Type=notify
+EnvironmentFile=/etc/pm-vpn-cluster/etcd.env
+Environment=ETCD_DATA_DIR=/var/lib/pm-vpn-etcd
+ExecStart=/opt/pm-vpn-cluster/etcd-v3.6.17-linux-amd64/etcd
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+DynamicUser=yes
+StateDirectory=pm-vpn-etcd
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
