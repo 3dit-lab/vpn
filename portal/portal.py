@@ -1203,6 +1203,15 @@ def current_person():
         "FROM people p JOIN orgs o ON o.id=p.org_id WHERE p.org_id=? AND p.phone=?", (org_id, phone)).fetchone()
 
 
+@app.route("/healthz")
+def health():
+    try:
+        db().execute("SELECT slot FROM portal_configs LIMIT 1" if SHARED_DSN else "SELECT 1").fetchone()
+    except (sqlite3.Error, postgres_backend.Error if SHARED_DSN else sqlite3.Error):
+        return "Unavailable\n", 503
+    return "OK\n", 200
+
+
 @app.route("/")
 def index():
     person = current_person()

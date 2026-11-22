@@ -24,6 +24,9 @@ data["wireguard_servers"] = [
 if sys.argv[2] == "--publish-estonia":
     data["servers"] = [s for s in data["servers"] if s["name"] != "ee-1"]
     data["servers"].append({"name": "ee-1", "ip": "85.92.158.146", "port": 443})
+if sys.argv[2] == "--portal-health":
+    for server in data["servers"]:
+        server["portal_health"] = True
 print(json.dumps(data, indent=2))
 PY
 python3 -m py_compile "$src/vpn-dnsd.py"

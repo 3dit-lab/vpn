@@ -7,12 +7,15 @@
 
 Конфиг: /etc/vpn-dnsd.json (пример в deploy/vpn-dnsd.json.example). Нужен пакет python3-dnslib.
 """
+import http.client
 import json
 import random
 import socket
+import ssl
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from dnslib import A, NS, QTYPE, RCODE, RR, SOA
 from dnslib.server import BaseResolver, DNSServer
@@ -33,7 +36,11 @@ def address(s):
     return s["ip"], int(s.get("port", 443))
 
 
-targets = {address(s): s for s in SERVERS + WG_SERVERS}
+def health_key(s):
+    return address(s), bool(s.get("portal_health"))
+
+
+targets = {health_key(s): s for s in SERVERS + WG_SERVERS}
 state = dict.fromkeys(targets, True)
 fail_count = dict.fromkeys(targets, 0)
 lock = threading.Lock()
@@ -41,34 +48,46 @@ lock = threading.Lock()
 
 def probe(s):
     try:
-        with socket.create_connection(address(s), timeout=2):
-            return True
-    except OSError:
+        with socket.create_connection(address(s), timeout=2) as conn:
+            if not s.get("portal_health"):
+                return True
+            with ssl.create_default_context().wrap_socket(conn, server_hostname=ZONE) as tls:
+                tls.settimeout(8)
+                tls.sendall(f"GET /healthz HTTP/1.1\r\nHost: {ZONE}\r\nConnection: close\r\n\r\n".encode("ascii"))
+                with http.client.HTTPResponse(tls) as response:
+                    response.begin()
+                    return response.status == 200 and response.read(3) == b"OK\n"
+    except (OSError, http.client.HTTPException):
         return False
 
 
 def health_loop():
-    while True:
-        for endpoint, s in targets.items():
-            ok = probe(s)
-            with lock:
-                if ok:
-                    fail_count[endpoint] = 0
-                    if not state[endpoint]:
-                        print(f"[health] {s['name']} {s['ip']} снова доступен", flush=True)
-                    state[endpoint] = True
-                else:
-                    fail_count[endpoint] += 1
-                    if fail_count[endpoint] >= FAILS and state[endpoint]:
-                        state[endpoint] = False
-                        print(f"[health] {s['name']} {s['ip']} недоступен", flush=True)
-        time.sleep(INTERVAL)
+    with ThreadPoolExecutor(max_workers=min(len(targets), 8)) as checks:
+        while True:
+            for endpoint, ok in zip(targets, checks.map(probe, targets.values())):
+                update_health(endpoint, ok)
+            time.sleep(INTERVAL)
+
+
+def update_health(endpoint, ok):
+    s = targets[endpoint]
+    with lock:
+        if ok:
+            fail_count[endpoint] = 0
+            if not state[endpoint]:
+                print(f"[health] {s['name']} {s['ip']} снова доступен", flush=True)
+            state[endpoint] = True
+        else:
+            fail_count[endpoint] += 1
+            if fail_count[endpoint] >= FAILS and state[endpoint]:
+                state[endpoint] = False
+                print(f"[health] {s['name']} {s['ip']} недоступен", flush=True)
 
 
 def alive_ips(servers):
     """Живые основные серверы; резервные ("backup": true) отдаются, только если ни один основной не жив."""
     with lock:
-        alive = [s for s in servers if state[address(s)]]
+        alive = [s for s in servers if state[health_key(s)]]
     main = [s["ip"] for s in alive if not s.get("backup")]
     if main:
         return main
