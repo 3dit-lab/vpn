@@ -20,13 +20,22 @@ if [[ ! -e "$conf" ]]; then
 Address = 10.19.0.1/20
 ListenPort = 51822
 PrivateKey = $(cat "$key")
-PostUp = /usr/local/sbin/pm-vpn-egress-firewall add %i 10.19.0.0/20 10.19.0.1
-PostDown = /usr/local/sbin/pm-vpn-egress-firewall remove %i 10.19.0.0/20 10.19.0.1
 WGCONF
     ln "$tmp" "$conf"
 fi
+sed -i '/^PostUp = \/usr\/local\/sbin\/pm-vpn-egress-firewall add %i 10\.19\.0\.0\/20 10\.19\.0\.1$/d;
+        /^PostDown = \/usr\/local\/sbin\/pm-vpn-egress-firewall remove %i 10\.19\.0\.0\/20 10\.19\.0\.1$/d' "$conf"
+install -d -m 0755 /etc/systemd/system/wg-quick@wg-portal.service.d
+cat >/etc/systemd/system/wg-quick@wg-portal.service.d/egress.conf <<'UNIT'
+[Service]
+ExecStartPost=/usr/local/sbin/pm-vpn-egress-firewall add wg-portal 10.19.0.0/20 10.19.0.1
+ExecStopPost=/usr/local/sbin/pm-vpn-egress-firewall remove wg-portal 10.19.0.0/20 10.19.0.1
+UNIT
+chmod 0644 /etc/systemd/system/wg-quick@wg-portal.service.d/egress.conf
+systemctl daemon-reload
 if command -v ufw >/dev/null && LC_ALL=C ufw status | grep -q '^Status: active$'; then
     ufw allow 51822/udp comment 'PM-VPN portal WireGuard'
 fi
-systemctl enable --now wg-quick@wg-portal.service
+systemctl enable wg-quick@wg-portal.service
+systemctl restart wg-quick@wg-portal.service
 wg show wg-portal listen-port
