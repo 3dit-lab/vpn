@@ -40,6 +40,7 @@ import random
 import re
 import secrets
 import sqlite3
+from contextlib import nullcontext
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -77,6 +78,9 @@ SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1"  # кнопка «Ссылка для Happ»: пока выключена, включается PORTAL_XRAY_UI=1
 DB_PATH = DATA_DIR / "portal.db"
+SHARED_DSN = os.environ.get("PORTAL_DB_DSN")
+if SHARED_DSN:
+    import postgres_backend
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
 DEFAULT_ORG_LIMIT = 10
@@ -101,6 +105,11 @@ except Exception:  # старый Python или нет tzdata
     TZ = timezone(timedelta(hours=4))
 
 app = Flask(__name__)
+if SHARED_DSN:
+    @app.errorhandler(postgres_backend.Unavailable)
+    def database_unavailable(_error):
+        return Response("База временно недоступна. Повторите запрос.", status=503,
+                        headers={"Retry-After": "5"}, mimetype="text/plain")
 secret = os.environ.get("PORTAL_SECRET_KEY")
 if not secret:
     if DEV:
@@ -619,6 +628,8 @@ CREATE TABLE IF NOT EXISTS captchas (id TEXT PRIMARY KEY, answer TEXT NOT NULL, 
 
 
 def connect():
+    if SHARED_DSN:
+        return postgres_backend.Connection(SHARED_DSN)
     c = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")
@@ -670,6 +681,13 @@ def migrate_v1(c):
 
 def init_db():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if SHARED_DSN:
+        c = connect()
+        try:
+            write_peers(c)
+        finally:
+            c.close()
+        return
     with open(DATA_DIR / ".init.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)  # несколько процессов gunicorn стартуют одновременно
         c = connect()
@@ -707,6 +725,8 @@ def slot_parity():
     """Чётность слотов, которые выдаёт ЭТОТ сервер: 0 (чётные), 1 (нечётные) или None (любые).
     Читается из локального файла PORTAL_SLOT_PARITY (/etc/vpn-slot-parity: odd|even), он не реплицируется:
     у каждого сервера свой. Так основной и резервный не выдадут один и тот же слот даже при рассинхроне."""
+    if SHARED_DSN:
+        return None
     try:
         v = Path(os.environ.get("PORTAL_SLOT_PARITY", "/etc/vpn-slot-parity")).read_text().strip().lower()
     except OSError:
@@ -714,7 +734,10 @@ def slot_parity():
     return {"odd": 1, "even": 0}.get(v)
 
 
-def all_slots():
+def all_slots(c=None):
+    if SHARED_DSN:
+        c = c or db()
+        return [r[0] for r in c.execute("SELECT slot FROM portal_configs ORDER BY slot")]
     if not CONF_DIR.is_dir():
         return []
     slots = []
@@ -737,18 +760,28 @@ def _public_from_private(priv_b64):
 _peer_cache = {}
 
 
-def peer_info(slot):
+def peer_info(slot, c=None, text=None):
     """Данные пира для сервера, полученные из клиентского конфига: публичный ключ, PSK, IP в туннеле."""
-    path = CONF_DIR / f"client{slot:03d}.conf"
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    stamp = (st.st_mtime_ns, st.st_size)
+    if SHARED_DSN:
+        if text is None:
+            c = c or db()
+            row = c.execute("SELECT body FROM portal_configs WHERE slot=?", (slot,)).fetchone()
+            if not row:
+                return None
+            text = row[0]
+        stamp = hashlib.sha256(text.encode()).digest()
+    else:
+        path = CONF_DIR / f"client{slot:03d}.conf"
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        stamp = (st.st_mtime_ns, st.st_size)
     hit = _peer_cache.get(slot)
     if hit and hit[0] == stamp:
         return hit[1]
-    text = path.read_text()
+    if not SHARED_DSN:
+        text = path.read_text()
     priv = re.search(r"(?m)^PrivateKey\s*=\s*(\S+)", text)
     psk = re.search(r"(?m)^PresharedKey\s*=\s*(\S+)", text)
     addr = re.search(r"(?m)^Address\s*=\s*(\d{1,3}(?:\.\d{1,3}){3})/32", text)
@@ -771,9 +804,22 @@ def enabled_slots(c):
 
 def write_peers(c):
     """Пишет peers.json для службы vpn-peer-sync. Файл меняется только при изменении содержимого."""
+    with open(PEERS_FILE.with_name("." + PEERS_FILE.name + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        project_peers(c)
+
+
+def project_peers(c):
     peers = []
-    for slot in enabled_slots(c):
-        info = peer_info(slot)
+    if SHARED_DSN:
+        rows = ((r[0], r[1]) for r in c.execute(
+            "SELECT a.slot, cfg.body FROM assignments a JOIN portal_configs cfg ON cfg.slot=a.slot "
+            "JOIN people p ON p.id=a.person_id JOIN orgs o ON o.id=p.org_id WHERE o.enabled=1 ORDER BY a.slot"
+        ))
+    else:
+        rows = ((slot, None) for slot in enabled_slots(c))
+    for slot, text in rows:
+        info = peer_info(slot, c, text)
         if info:
             peers.append(info)
         else:
@@ -852,10 +898,13 @@ def fmt_bytes(n):
 app.jinja_env.globals["fmt_bytes"] = fmt_bytes
 
 
-def rotate_slot(slot):
+def rotate_slot(slot, c=None):
     """Меняет ключи конфига (клиентский ключ и PSK): прежнее устройство перестаёт подключаться, конфиг можно выдать заново."""
     path = CONF_DIR / f"client{slot:03d}.conf"
-    text = path.read_text()
+    if SHARED_DSN:
+        text = c.execute("SELECT body FROM portal_configs WHERE slot=?", (slot,)).fetchone()[0]
+    else:
+        text = path.read_text()
     priv = X25519PrivateKey.generate()
     raw = priv.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
     new_priv, new_psk = _b64(raw), _b64(secrets.token_bytes(32))
@@ -863,10 +912,13 @@ def rotate_slot(slot):
     text, n2 = re.subn(r"(?m)^PresharedKey\s*=.*$", lambda m: f"PresharedKey = {new_psk}", text, count=1)
     if not (n1 and n2):
         raise RuntimeError(f"В конфиге №{slot:03d} не найдены PrivateKey/PresharedKey")
-    tmp = path.with_name("." + path.name + ".tmp")
-    tmp.write_text(text)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    if SHARED_DSN:
+        c.execute("UPDATE portal_configs SET body=? WHERE slot=?", (text, slot))
+    else:
+        tmp = path.with_name("." + path.name + ".tmp")
+        tmp.write_text(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
     _peer_cache.pop(slot, None)
 
 
@@ -1054,14 +1106,17 @@ def new_captcha():
 def verify_captcha(cid, answer):
     """Проверка ответа. Капча одноразовая: после любой проверки удаляется."""
     c = db()
-    c.execute("BEGIN IMMEDIATE")
-    try:
-        row = c.execute("SELECT answer, ts FROM captchas WHERE id=?", (cid or "",)).fetchone()
-        c.execute("DELETE FROM captchas WHERE id=?", (cid or "",))
-        c.execute("COMMIT")
-    except Exception:
-        c.execute("ROLLBACK")
-        raise
+    if SHARED_DSN:
+        row = c.execute("DELETE FROM captchas WHERE id=? RETURNING answer, ts", (cid or "",)).fetchone()
+    else:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute("SELECT answer, ts FROM captchas WHERE id=?", (cid or "",)).fetchone()
+            c.execute("DELETE FROM captchas WHERE id=?", (cid or "",))
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
     if not row or now() - row["ts"] > CAPTCHA_TTL:
         return False
     given = re.sub(r"\s", "", answer or "").upper()
@@ -1167,7 +1222,10 @@ def login():
         if len(name) < 2:
             flash("При первом входе укажите фамилию и имя.", "err")
             return redirect("/")
-        c.execute("INSERT INTO people(org_id, phone, name, created_at) VALUES(?,?,?,?)", (org["id"], phone, name, now()))
+        insert = "INSERT INTO people(org_id, phone, name, created_at) VALUES(?,?,?,?)"
+        if SHARED_DSN:
+            insert += " ON CONFLICT (org_id, phone) DO NOTHING"
+        c.execute(insert, (org["id"], phone, name, now()))
         log.info("login: новый человек %s (%s)", mask_phone(phone), org["slug"])
     else:
         if not person["name"] and name:
@@ -1203,20 +1261,30 @@ def claim():
         return redirect("/")
     label = clean_text(request.form.get("label"), 30)
     c = db()
-    c.execute("BEGIN IMMEDIATE")
+    if SHARED_DSN:
+        c.begin_write()
+    else:
+        c.execute("BEGIN IMMEDIATE")
     try:
-        org = c.execute("SELECT key_limit, enabled FROM orgs WHERE id=?", (person["org_id"],)).fetchone()
+        query = "SELECT key_limit, enabled FROM orgs WHERE id=?"
+        if SHARED_DSN:
+            query += " FOR UPDATE"
+        org = c.execute(query, (person["org_id"],)).fetchone()
+        limit = person["dev_limit"]
+        if SHARED_DSN:
+            current = c.execute("SELECT dev_limit FROM people WHERE id=? FOR UPDATE", (person["id"],)).fetchone()
+            limit = current[0] if current else 0
         have = c.execute("SELECT COUNT(*) FROM assignments WHERE person_id=?", (person["id"],)).fetchone()[0]
         used = c.execute("SELECT COUNT(*) FROM assignments a JOIN people p ON p.id=a.person_id WHERE p.org_id=?",
                          (person["org_id"],)).fetchone()[0]
         taken = {r[0] for r in c.execute("SELECT slot FROM assignments")}
         par = slot_parity()
-        free = [s for s in all_slots() if s not in taken and (par is None or s % 2 == par)]
+        free = [s for s in all_slots(c) if s not in taken and (par is None or s % 2 == par)]
         problem = None
         if not org or not org["enabled"]:
             problem = "Доступ для вашей организации отключён."
-        elif person["dev_limit"] is not None and have >= person["dev_limit"]:
-            problem = f"Администратор ограничил число ваших устройств: {person['dev_limit']}."
+        elif limit is not None and have >= limit:
+            problem = f"Администратор ограничил число ваших устройств: {limit}."
         elif used >= org["key_limit"]:
             problem = "Лимит ключей вашей организации исчерпан. Обратитесь к администратору организации."
         elif not free:
@@ -1233,7 +1301,7 @@ def claim():
     except Exception:
         try:
             c.execute("ROLLBACK")
-        except sqlite3.Error:
+        except (sqlite3.Error, postgres_backend.Error if SHARED_DSN else sqlite3.Error):
             pass
         raise
     record_attempt("claim")
@@ -1250,14 +1318,27 @@ def download(slot):
     if not person or not person["org_enabled"]:
         return Response("Требуется вход", status=403, mimetype="text/plain")
     c = db()
-    row = c.execute("SELECT person_id FROM assignments WHERE slot=?", (slot,)).fetchone()
-    if not row or row["person_id"] != person["id"]:
-        return Response("Не найдено", status=404, mimetype="text/plain")
-    path = CONF_DIR / f"client{slot:03d}.conf"
-    if not path.is_file():
-        return Response("Файл конфига не найден, сообщите администратору", status=500, mimetype="text/plain")
-    c.execute("UPDATE assignments SET downloads=downloads+1, last_download_at=? WHERE slot=?", (now(), slot))
-    body = path.read_bytes()
+    if SHARED_DSN:
+        with c.write_transaction():
+            row = c.execute(
+                "UPDATE assignments a SET downloads=a.downloads+1, last_download_at=? "
+                "FROM portal_configs cfg, people p, orgs o "
+                "WHERE a.slot=? AND a.person_id=? AND cfg.slot=a.slot AND p.id=a.person_id "
+                "AND o.id=p.org_id AND o.enabled=1 RETURNING cfg.body",
+                (now(), slot, person["id"]),
+            ).fetchone()
+            if not row:
+                return Response("Не найдено", status=404, mimetype="text/plain")
+            body = row[0].encode("utf-8")
+    else:
+        row = c.execute("SELECT person_id FROM assignments WHERE slot=?", (slot,)).fetchone()
+        if not row or row["person_id"] != person["id"]:
+            return Response("Не найдено", status=404, mimetype="text/plain")
+        path = CONF_DIR / f"client{slot:03d}.conf"
+        if not path.is_file():
+            return Response("Файл конфига не найден, сообщите администратору", status=500, mimetype="text/plain")
+        c.execute("UPDATE assignments SET downloads=downloads+1, last_download_at=? WHERE slot=?", (now(), slot))
+        body = path.read_bytes()
     chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None)
     suffix = ""
     if chosen:
@@ -1345,7 +1426,9 @@ def load_people(org_id):
     c = db()
     people = {}
     totals = traffic_totals()
-    for p in c.execute("SELECT id, phone, name, created_at, rx_archived, tx_archived, dev_limit FROM people WHERE org_id=? ORDER BY name COLLATE NOCASE, phone", (org_id,)):
+    ordering = "lower(name)" if SHARED_DSN else "name COLLATE NOCASE"
+    for p in c.execute("SELECT id, phone, name, created_at, rx_archived, tx_archived, dev_limit FROM people "
+                       f"WHERE org_id=? ORDER BY {ordering}, phone", (org_id,)):
         people[p["id"]] = {"id": p["id"], "dev_limit": p["dev_limit"], "phone": phone_display(p["phone"]), "raw": p["phone"], "name": p["name"],
                            "confs": [], "first_ts": None, "last_ts": None,
                            "rx": p["rx_archived"], "tx": p["tx_archived"]}
@@ -1391,20 +1474,21 @@ def people_csv(people, org_name=None):
 def release_slot(slot, actor, org_id=None):
     """Освобождает конфиг: ключи заменяются, устройство прежнего владельца отключается, конфиг возвращается в пул."""
     c = db()
-    row = c.execute("SELECT a.slot, p.org_id, p.phone FROM assignments a JOIN people p ON p.id=a.person_id WHERE a.slot=?", (slot,)).fetchone()
-    if not row or (org_id is not None and row["org_id"] != org_id):
-        flash("Конфиг не найден.", "err")
-        return False
-    rx, tx = slot_traffic(slot)
-    try:
-        rotate_slot(slot)
-    except (OSError, RuntimeError) as e:
-        log.error("release: не удалось заменить ключи конфига №%03d: %s", slot, e)
-        flash(f"Не удалось заменить ключи конфига №{slot:03d}, конфиг не освобождён.", "err")
-        return False
-    c.execute("UPDATE people SET rx_archived=rx_archived+?, tx_archived=tx_archived+? WHERE id=(SELECT person_id FROM assignments WHERE slot=?)", (rx, tx, slot))
-    c.execute("DELETE FROM assignments WHERE slot=?", (slot,))
-    audit(actor, "освобождён конфиг", f"№{slot:03d} ({mask_phone(row['phone'])}), ключи заменены", row["org_id"])
+    with c.write_transaction() if SHARED_DSN else nullcontext():
+        row = c.execute("SELECT a.slot, p.org_id, p.phone FROM assignments a JOIN people p ON p.id=a.person_id WHERE a.slot=?", (slot,)).fetchone()
+        if not row or (org_id is not None and row["org_id"] != org_id):
+            flash("Конфиг не найден.", "err")
+            return False
+        rx, tx = slot_traffic(slot)
+        try:
+            rotate_slot(slot, c)
+        except (OSError, RuntimeError) as e:
+            log.error("release: не удалось заменить ключи конфига №%03d: %s", slot, e)
+            flash(f"Не удалось заменить ключи конфига №{slot:03d}, конфиг не освобождён.", "err")
+            return False
+        c.execute("UPDATE people SET rx_archived=rx_archived+?, tx_archived=tx_archived+? WHERE id=(SELECT person_id FROM assignments WHERE slot=?)", (rx, tx, slot))
+        c.execute("DELETE FROM assignments WHERE slot=?", (slot,))
+        audit(actor, "освобождён конфиг", f"№{slot:03d} ({mask_phone(row['phone'])}), ключи заменены", row["org_id"])
     write_peers(c)
     log.info("release: %s освободил конфиг №%03d", actor, slot)
     flash(f"Конфиг №{slot:03d} освобождён, ключи заменены.", "ok")
@@ -1659,9 +1743,12 @@ def super_org_create():
     else:
         code = code or unique_code(c)
         pw = gen_password()
-        cur = c.execute("INSERT INTO orgs(name, slug, code, key_limit, enabled, admin_hash, created_at) VALUES(?,?,?,?,1,?,?)",
-                        (name, slug, code, limit, hash_password(pw), now()))
-        audit("super", "создана организация", f"{name} ({slug}), лимит {limit}", cur.lastrowid)
+        insert = "INSERT INTO orgs(name, slug, code, key_limit, enabled, admin_hash, created_at) VALUES(?,?,?,?,1,?,?)"
+        if SHARED_DSN:
+            insert += " RETURNING id"
+        cur = c.execute(insert, (name, slug, code, limit, hash_password(pw), now()))
+        oid = cur.fetchone()[0] if SHARED_DSN else cur.lastrowid
+        audit("super", "создана организация", f"{name} ({slug}), лимит {limit}", oid)
         flash(f"Организация «{name}» создана. Код доступа: {code}. Логин администратора: {slug}, пароль: {pw} "
               f"(пароль показан один раз, сохраните его).", "ok")
     return redirect("/super")
@@ -1847,7 +1934,14 @@ def super_backup():
     if phrase != phrase2:
         flash("Парольные фразы не совпадают.", "err")
         return redirect("/super/backup")
-    plain, manifest = backup.dump_state(db(), CONF_DIR, TRAFFIC_FILE)
+    if SHARED_DSN:
+        c = db()
+        with c.read_snapshot():
+            configs = {f"client{r[0]:03d}.conf": r[1].encode("utf-8")
+                       for r in c.execute("SELECT slot, body FROM portal_configs ORDER BY slot")}
+            plain, manifest = backup.dump_state(c, CONF_DIR, TRAFFIC_FILE, configs=configs)
+    else:
+        plain, manifest = backup.dump_state(db(), CONF_DIR, TRAFFIC_FILE)
     blob = backup.encrypt(plain, phrase)
     counts = manifest["counts"]
     audit("super", "создана резервная копия", f"организаций {counts['orgs']}, людей {counts['people']}, выдано {counts['assignments']}, конфигов {counts['configs']}")

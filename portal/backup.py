@@ -53,17 +53,19 @@ def _rows(conn, table):
     return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1")]
 
 
-def dump_state(conn, conf_dir, traffic_file=None):
+def dump_state(conn, conf_dir, traffic_file=None, *, configs=None):
     """Собирает tar.gz (в памяти) с состоянием портала и всеми конфигами."""
     state = {t: _rows(conn, t) for t in TABLES}
     try:  # накопленные счётчики трафика по ключам (их ведёт служба vpn-traffic)
         state["traffic"] = json.loads(Path(traffic_file).read_text()) if traffic_file else None
     except (OSError, ValueError):
         state["traffic"] = None
-    confs = {}
-    for f in sorted(Path(conf_dir).iterdir()):
-        if CONF_NAME_RE.match(f.name):
-            confs[f.name] = f.read_bytes()
+    confs = configs
+    if confs is None:
+        confs = {}
+        for f in sorted(Path(conf_dir).iterdir()):
+            if CONF_NAME_RE.match(f.name):
+                confs[f.name] = f.read_bytes()
     manifest = {
         "format": 1,
         "created_at": int(time.time()),
