@@ -34,7 +34,7 @@ def main():
         x = Ctx(portal)
         alice, bob, carol = (x.client() for _ in range(3))
         for index, client in enumerate((alice, bob, carol), 1):
-            x.emp_login(client, "33333", phone=f"+7900111223{index}", name="Test User")
+            assert x.emp_login(client, "33333", phone=f"+7900111223{index}", name="Test User").status_code == 200
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             status = list(executor.map(lambda c: x.claim(c).status_code, (alice, bob, carol)))
         assert status == [200, 200, 200]
@@ -48,7 +48,7 @@ def main():
         before = owner.get(f"/d/{slot}/conf")
         assert before.status_code == 200 and b"PrivateKey" in before.data
         admin = x.client()
-        x.super_login(admin)
+        assert x.super_login(admin).status_code == 200
         assert x.post(admin, f"/super/release/{slot}").status_code == 200
         assert owner.get(f"/d/{slot}/conf").status_code == 404
         assert x.claim(other).status_code == 200

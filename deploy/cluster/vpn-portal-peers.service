@@ -1,0 +1,21 @@
+[Unit]
+Description=Project shared VPN peers from PostgreSQL
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/vpn-portal-shared.env
+
+[Service]
+Type=oneshot
+User=vpnportal
+Group=vpnportal
+EnvironmentFile=/etc/vpn-portal.env
+EnvironmentFile=/etc/vpn-portal-shared.env
+WorkingDirectory=/opt/vpn-portal
+ExecStart=/usr/bin/python3 /opt/vpn-portal/portal.py
+UMask=0077
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+StateDirectory=vpn-portal
+StateDirectoryMode=0700
+LogsDirectory=vpn-portal

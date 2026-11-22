@@ -1658,10 +1658,11 @@ def admin_login_compat():
 
 
 def org_rows():
+    ordering = "lower(o.name)" if SHARED_DSN else "o.name COLLATE NOCASE"
     rows = db().execute(
         "SELECT o.*, (SELECT COUNT(*) FROM people p WHERE p.org_id=o.id) AS people, "
         "(SELECT COUNT(*) FROM assignments a JOIN people p ON p.id=a.person_id WHERE p.org_id=o.id) AS issued "
-        "FROM orgs o ORDER BY o.name COLLATE NOCASE").fetchall()
+        f"FROM orgs o ORDER BY {ordering}").fetchall()
     totals = traffic_totals()
     used = {}
     c = db()
