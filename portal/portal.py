@@ -75,12 +75,17 @@ def parse_servers(raw):
 
 
 SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
-WG_GATEWAY = None
-if os.environ.get("PORTAL_WG_ENDPOINT"):
+WG_SERVERS = parse_servers(os.environ.get("PORTAL_WG_SERVERS"))
+WG_GATEWAYS = {}
+if WG_SERVERS or os.environ.get("PORTAL_WG_ENDPOINT"):
     from wireguard_profile import Gateway, client_address
 
-    WG_GATEWAY = Gateway(os.environ["PORTAL_WG_ENDPOINT"], os.environ["PORTAL_WG_PUBLIC_KEY"],
-                         os.environ.get("PORTAL_WG_DNS", ""))
+    key, dns = os.environ["PORTAL_WG_PUBLIC_KEY"], os.environ.get("PORTAL_WG_DNS", "")
+    if WG_SERVERS:
+        port = int(os.environ.get("PORTAL_WG_PORT", "51822"))
+        WG_GATEWAYS = {s["key"]: Gateway(f"{s['host']}:{port}", key, dns, full=s["full"]) for s in WG_SERVERS}
+    else:
+        WG_GATEWAYS["default"] = Gateway(os.environ["PORTAL_WG_ENDPOINT"], key, dns)
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1"  # кнопка «Ссылка для Happ»: пока выключена, включается PORTAL_XRAY_UI=1
 DB_PATH = DATA_DIR / "portal.db"
@@ -302,7 +307,16 @@ TEMPLATES = {
     <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер. Вариант «весь трафик» пускает через VPN весь интернет устройства, без разделения.</small><br>{% endif %}
     <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
     <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скопировать конфиг</button>
-    {% if d.wireguard %}<a class="btn secondary" href="/d/{{ d.slot }}/conf?format=wireguard">Скачать WireGuard</a>{% endif %}
+    {% if d.wireguard and not wireguard_servers %}<a class="btn secondary" href="/d/{{ d.slot }}/conf?format=wireguard">Скачать WireGuard</a>{% endif %}
+    {% if d.wireguard and wireguard_servers %}
+    <form method="get" action="/d/{{ d.slot }}/conf">
+      <input type="hidden" name="format" value="wireguard">
+      <label>Сервер WireGuard
+        <select name="srv">{% for sv in wireguard_servers %}<option value="{{ sv.key }}">{{ sv.title }}</option>{% endfor %}</select>
+      </label>
+      <button class="btn secondary" type="submit">Скачать WireGuard</button>
+    </form>
+    {% endif %}
     {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
     <small class="copystate"></small>
   </div>
@@ -906,7 +920,7 @@ def fmt_bytes(n):
 
 
 def shared_wg_address(slot):
-    if WG_GATEWAY:
+    if WG_GATEWAYS:
         try:
             return client_address(slot)
         except ValueError:
@@ -1204,7 +1218,8 @@ def index():
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"]),
                 "wireguard": bool(shared_wg_address(r["slot"]))} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
-                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS, xray=XRAY_UI and bool(xray_state()))
+                org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS,
+                wireguard_servers=WG_SERVERS, xray=XRAY_UI and bool(xray_state()))
 
 
 @app.route("/login", methods=["POST"])
@@ -1366,7 +1381,8 @@ def download(slot):
     suffix = ""
     if plain:
         try:
-            body = WG_GATEWAY.render(slot, body)
+            gateway = WG_GATEWAYS.get(request.args.get("srv")) or next(iter(WG_GATEWAYS.values()))
+            body = gateway.render(slot, body)
         except (ValueError, KeyError) as error:
             log.error("download: WireGuard slot %d could not be rendered (%s)", slot, type(error).__name__)
             return Response("Не удалось собрать WireGuard-конфиг", status=503, mimetype="text/plain")

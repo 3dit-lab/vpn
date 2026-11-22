@@ -20,13 +20,14 @@ def key(value):
 
 
 class Gateway:
-    def __init__(self, endpoint, public_key, dns=""):
+    def __init__(self, endpoint, public_key, dns="", *, full=False):
         match = re.fullmatch(r"([a-zA-Z0-9.-]+):([0-9]{1,5})", endpoint)
         if not match or not 1 <= int(match[2]) <= 65535:
             raise ValueError("Expected a WireGuard hostname and UDP port")
         self.endpoint = endpoint
         self.public_key = key(public_key)
         self.dns = str(ipaddress.IPv4Address(dns)) if dns else ""
+        self.full = full
 
     def render(self, slot, original):
         values = dict(re.findall(r"(?m)^[ \t]*(PrivateKey|PresharedKey|AllowedIPs|DNS)[ \t]*=[ \t]*([^\r\n#]+)",
@@ -36,7 +37,9 @@ class Gateway:
         old_dns = {ipaddress.ip_address(s.strip()) for s in values.get("DNS", "").split(",") if s.strip()}
         routes = list(dict.fromkeys(ipaddress.ip_network(s.strip(), strict=False)
                                     for s in values["AllowedIPs"].split(",") if s.strip()))
-        routes = [r for r in routes if not (r.num_addresses == 1 and r.network_address in old_dns)]
+        routes = [r for r in routes if r.version == 4 and not (r.num_addresses == 1 and r.network_address in old_dns)]
+        if self.full:
+            routes = [ipaddress.ip_network("0.0.0.0/0")]
         if self.dns:
             dns = ipaddress.IPv4Address(self.dns)
             if not any(dns in r for r in routes):
