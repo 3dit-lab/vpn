@@ -75,6 +75,12 @@ def parse_servers(raw):
 
 
 SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
+WG_GATEWAY = None
+if os.environ.get("PORTAL_WG_ENDPOINT"):
+    from wireguard_profile import Gateway, client_address
+
+    WG_GATEWAY = Gateway(os.environ["PORTAL_WG_ENDPOINT"], os.environ["PORTAL_WG_PUBLIC_KEY"],
+                         os.environ.get("PORTAL_WG_DNS", ""))
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1"  # кнопка «Ссылка для Happ»: пока выключена, включается PORTAL_XRAY_UI=1
 DB_PATH = DATA_DIR / "portal.db"
@@ -296,6 +302,7 @@ TEMPLATES = {
     <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер. Вариант «весь трафик» пускает через VPN весь интернет устройства, без разделения.</small><br>{% endif %}
     <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
     <button class="btn secondary copy" type="button" data-url="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скопировать конфиг</button>
+    {% if d.wireguard %}<a class="btn secondary" href="/d/{{ d.slot }}/conf?format=wireguard">Скачать WireGuard</a>{% endif %}
     {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
     <small class="copystate"></small>
   </div>
@@ -789,6 +796,9 @@ def peer_info(slot, c=None, text=None):
     if priv and psk and addr:
         try:
             info = {"slot": slot, "public": _public_from_private(priv.group(1)), "psk": psk.group(1), "ip": addr.group(1)}
+            wg_address = shared_wg_address(slot)
+            if wg_address:
+                info["wireguard_ip"] = wg_address
         except ValueError:
             info = None
     _peer_cache[slot] = (stamp, info)
@@ -893,6 +903,15 @@ def fmt_bytes(n):
         n /= 1024
         if n < 1024 or unit == "ТБ":
             return f"{n:.0f} {unit}" if n >= 100 else f"{n:.1f} {unit}"
+
+
+def shared_wg_address(slot):
+    if WG_GATEWAY:
+        try:
+            return client_address(slot)
+        except ValueError:
+            pass
+    return None
 
 
 app.jinja_env.globals["fmt_bytes"] = fmt_bytes
@@ -1182,7 +1201,8 @@ def index():
         return page("login.html", captcha_id=new_captcha())
     rows = db().execute("SELECT slot, label, assigned_at FROM assignments WHERE person_id=? ORDER BY assigned_at, slot",
                         (person["id"],)).fetchall()
-    devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"])} for r in rows]
+    devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"]),
+                "wireguard": bool(shared_wg_address(r["slot"]))} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
                 org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS, xray=XRAY_UI and bool(xray_state()))
 
@@ -1317,6 +1337,9 @@ def download(slot):
     person = current_person()
     if not person or not person["org_enabled"]:
         return Response("Требуется вход", status=403, mimetype="text/plain")
+    plain = request.args.get("format") == "wireguard"
+    if plain and not shared_wg_address(slot):
+        return Response("WireGuard недоступен для этого конфига", status=404, mimetype="text/plain")
     c = db()
     if SHARED_DSN:
         with c.write_transaction():
@@ -1341,7 +1364,14 @@ def download(slot):
         body = path.read_bytes()
     chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None)
     suffix = ""
-    if chosen:
+    if plain:
+        try:
+            body = WG_GATEWAY.render(slot, body)
+        except (ValueError, KeyError) as error:
+            log.error("download: WireGuard slot %d could not be rendered (%s)", slot, type(error).__name__)
+            return Response("Не удалось собрать WireGuard-конфиг", status=503, mimetype="text/plain")
+        suffix = "-wg"
+    elif chosen:
         body = re.sub(rb"(?m)^(Endpoint\s*=\s*)[^:\s]+(:\d+)\s*$",
                       lambda m: m.group(1) + chosen["host"].encode() + m.group(2), body)
         if chosen.get("full"):

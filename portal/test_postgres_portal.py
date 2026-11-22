@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg
 
-from test_portal import Ctx, SUPER_PW, write_confs
+from test_portal import Ctx, SUPER_PW, b64key, write_confs
 
 
 def main():
@@ -28,7 +28,9 @@ def main():
                                  for slot in range(1, 7)])
         os.environ.update(PORTAL_DEV="1", PORTAL_DATA=str(root), PORTAL_PEERS=str(root / "peers.json"),
                           PORTAL_LOG_DIR=str(root / "logs"), PORTAL_SECRET_KEY="test-shared",
-                          SUPERADMIN_PASSWORD=SUPER_PW, PORTAL_DB_DSN=dsn)
+                          SUPERADMIN_PASSWORD=SUPER_PW, PORTAL_DB_DSN=dsn,
+                          PORTAL_WG_ENDPOINT="ee-1-vpn.example.test:51822",
+                          PORTAL_WG_PUBLIC_KEY=b64key(201))
         import portal
 
         x = Ctx(portal)
@@ -47,6 +49,10 @@ def main():
         assert other.get(f"/d/{slot}/conf").status_code == 404
         before = owner.get(f"/d/{slot}/conf")
         assert before.status_code == 200 and b"PrivateKey" in before.data
+        plain = owner.get(f"/d/{slot}/conf?format=wireguard")
+        assert plain.status_code == 200 and b"Endpoint = ee-1-vpn.example.test:51822" in plain.data
+        assert b"Address = 10.19.0.2/32" in plain.data and b"10.8.0.2" not in plain.data
+        assert other.get(f"/d/{slot}/conf?format=wireguard").status_code == 404
         admin = x.client()
         assert x.super_login(admin).status_code == 200
         assert x.post(admin, f"/super/release/{slot}").status_code == 200
@@ -54,8 +60,9 @@ def main():
         assert x.claim(other).status_code == 200
         after = other.get(f"/d/{slot}/conf")
         assert after.status_code == 200 and after.data != before.data
-        assert len(json.loads((root / "peers.json").read_text())["peers"]) == 2
-        print("PASS: concurrent claims, org limit, authorization, download, atomic rotation and reassignment")
+        peers = json.loads((root / "peers.json").read_text())["peers"]
+        assert len(peers) == 2 and peers[0]["wireguard_ip"] == "10.19.0.2"
+        print("PASS: concurrent claims, org limit, authorization, both profile formats, atomic rotation and reassignment")
 
 
 if __name__ == "__main__":
