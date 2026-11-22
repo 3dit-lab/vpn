@@ -12,7 +12,7 @@ cleanup() { rm -rf -- "$d"; }
 trap cleanup EXIT
 cp -p "$config" "$d/config"
 cp -p "$program" "$d/program"
-python3 - "$config" >"$d/next" <<'PY'
+python3 - "$config" "${1:-}" >"$d/next" <<'PY'
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
@@ -21,6 +21,9 @@ data["wireguard_servers"] = [
     {"name": n, "ip": ip, "port": 443}
     for n, ip in (("fi-1", "194.77.71.148"), ("fi-2", "91.211.114.164"), ("ee-1", "85.92.158.146"))
 ]
+if sys.argv[2] == "--publish-estonia":
+    data["servers"] = [s for s in data["servers"] if s["name"] != "ee-1"]
+    data["servers"].append({"name": "ee-1", "ip": "85.92.158.146", "port": 443})
 print(json.dumps(data, indent=2))
 PY
 python3 -m py_compile "$src/vpn-dnsd.py"
