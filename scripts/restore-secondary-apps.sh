@@ -15,6 +15,7 @@ proxy_set_header Host vpn.3dit.ru;
 proxy_ssl_server_name on;
 proxy_ssl_name vpn.3dit.ru;
 proxy_ssl_verify on;
+proxy_ssl_verify_depth 3;
 proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
 proxy_connect_timeout 3s;
 NGINX
@@ -35,6 +36,7 @@ NGINX
         proxy_ssl_server_name on;
         proxy_ssl_name vpn.3dit.ru;
         proxy_ssl_verify on;
+        proxy_ssl_verify_depth 3;
         proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
     }
 
