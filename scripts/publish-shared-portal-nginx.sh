@@ -43,8 +43,16 @@ NGINX
     *) exit 2 ;;
 esac
 install -m 0644 "$work/config" "$conf"
-if nginx -t && systemctl reload nginx &&
-    curl -fsS --noproxy '*' --resolve vpn.3dit.ru:443:127.0.0.1 --max-time 10 https://vpn.3dit.ru/ >/dev/null; then
+ready() {
+    for attempt in {1..10}; do
+        if curl -fsS --noproxy '*' --resolve vpn.3dit.ru:443:127.0.0.1 --max-time 3 https://vpn.3dit.ru/ >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+if nginx -t && systemctl reload nginx && ready; then
     systemctl enable --now "pm-vpn-portal-tls@$site.timer"
 else
     if test -f "$work/original"; then cp -p "$work/original" "$conf"; else rm "$conf"; fi
