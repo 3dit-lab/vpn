@@ -12,7 +12,10 @@ if python3 -c 'import psycopg, gunicorn' 2>/dev/null; then
 else
     python3 -m venv --system-site-packages "$dst/venv"
     "$dst/venv/bin/pip" install 'psycopg[binary]==3.2.10'
-    ln -sfn "$dst/venv/bin/python" "$dst/python"
+    wrapper=$(mktemp "$dst/.python.XXXXXX")
+    printf '%s\n' '#!/bin/sh' 'exec /opt/vpn-portal-shared/venv/bin/python "$@"' >"$wrapper"
+    chmod 0755 "$wrapper"
+    mv -T "$wrapper" "$dst/python"
 fi
 "$dst/python" -c 'import flask, psycopg, gunicorn, cryptography, PIL'
 "$dst/python" -m py_compile "$dst/"*.py
