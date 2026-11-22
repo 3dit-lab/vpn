@@ -36,7 +36,12 @@ for attempt in {1..15}; do
 done
 install -m 0644 "$src/deploy/fail2ban/filter.d/vpn-portal-auth.conf" /etc/fail2ban/filter.d/
 # Keep host defaults and the centrally managed Guard TRUST exclusions.
-grep -v -E '^\[DEFAULT\]$|^ignoreip[[:space:]]*=' \
+if [[ ! -e /var/log/nginx/vpn-portal-auth.log ]]; then
+    install -m 0640 -o www-data -g adm /dev/null /var/log/nginx/vpn-portal-auth.log
+fi
+awk '/^\[DEFAULT\]$/ || /^ignoreip[[:space:]]*=/ {next}
+     {print}
+     /^logpath.*vpn-portal\/auth\.log$/ {print "           /var/log/nginx/vpn-portal-auth.log"}' \
     "$src/deploy/fail2ban/jail.d/vpn-portal.local" \
     >/etc/fail2ban/jail.d/vpn-portal.local
 fail2ban-client -t
