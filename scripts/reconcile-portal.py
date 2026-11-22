@@ -32,6 +32,7 @@ def merge(primary, secondary, dst):
     stats = {"added_users": 0, "primary_user_settings_retained": 0, "added_assignments": 0}
     people = {(r["org_id"], r["phone"]): r for r in primary.execute("SELECT * FROM people")}
     ids = {}
+    dst.row_factory = sqlite3.Row
     primary.backup(dst)
     dst.execute("PRAGMA foreign_keys=ON")
 
@@ -69,6 +70,13 @@ def merge(primary, secondary, dst):
                 (slot, owner, entry["label"], entry["assigned_at"], entry["last_download_at"], entry["downloads"]),
             )
             stats["added_assignments"] += 1
+
+        for entry in primary.execute("SELECT slot, assigned_at FROM assignments"):
+            if secondary.execute(
+                "SELECT 1 FROM audit WHERE ts>=? AND action=? AND details LIKE ?",
+                (entry["assigned_at"], "освобождён конфиг", f"№{entry['slot']:03d} (%"),
+            ).fetchone():
+                raise ValueError(f"Primary assignment for slot {entry['slot']} may have been revoked")
 
     if dst.execute("PRAGMA quick_check").fetchone()[0] != "ok" or dst.execute("PRAGMA foreign_key_check").fetchone():
         raise ValueError("Merged snapshot failed integrity validation")
