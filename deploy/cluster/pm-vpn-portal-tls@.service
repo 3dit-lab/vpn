@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync shared portal TLS certificate on %i
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/pm-vpn-stage-source/scripts/sync-portal-tls.sh %i

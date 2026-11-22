@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the shared portal TLS certificate on %i
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1h
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
