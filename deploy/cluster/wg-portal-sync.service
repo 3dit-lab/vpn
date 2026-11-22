@@ -1,0 +1,15 @@
+[Unit]
+Description=Apply VPN portal peers to plain WireGuard
+Requires=wg-quick@wg-portal.service
+After=wg-quick@wg-portal.service
+ConditionPathExists=/etc/vpn-portal-shared.env
+
+[Service]
+Type=oneshot
+Environment=SYNC_PLAIN_WG=1
+Environment=SYNC_CONF_DIR=/etc/wireguard
+Environment=SYNC_IFACE=wg-portal
+Environment=AWG_BIN=wg
+Environment=AWG_QUICK_BIN=wg-quick
+ExecStart=/usr/bin/python3 /opt/vpn-portal-shared/sync-peers.py
+UMask=0077

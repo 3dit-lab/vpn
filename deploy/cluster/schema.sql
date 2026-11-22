@@ -25,8 +25,13 @@ CREATE TABLE people (
     UNIQUE (org_id, phone)
 );
 
+CREATE TABLE portal_configs (
+    slot integer PRIMARY KEY CHECK (slot > 0),
+    body text NOT NULL
+);
+
 CREATE TABLE assignments (
-    slot integer PRIMARY KEY,
+    slot integer PRIMARY KEY REFERENCES portal_configs(slot),
     person_id bigint NOT NULL REFERENCES people(id),
     label text NOT NULL DEFAULT '',
     assigned_at bigint NOT NULL,

@@ -6,6 +6,7 @@
 соединений (awg syncconf). Если peers.json нет или он некорректен, ничего не меняется.
 """
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -19,6 +20,7 @@ CONF_DIR = Path(os.environ.get("SYNC_CONF_DIR", "/etc/amnezia/amneziawg"))
 IFACE = os.environ.get("SYNC_IFACE", "awg0")
 AWG = os.environ.get("AWG_BIN", "awg")
 AWG_QUICK = os.environ.get("AWG_QUICK_BIN", "awg-quick")
+PLAIN_WG = os.environ.get("SYNC_PLAIN_WG") == "1"
 KEY_RE = re.compile(r"^[A-Za-z0-9+/]{43}=$")
 IP_RE = re.compile(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
@@ -43,6 +45,10 @@ def load_peers():
     out, seen_ip, seen_key = [], set(), set()
     for p in data["peers"]:
         slot, pub, psk, ip = p.get("slot"), p.get("public"), p.get("psk"), p.get("ip")
+        if PLAIN_WG:
+            ip = p.get("wireguard_ip")
+            if not isinstance(ip, str) or ipaddress.IPv4Address(ip) not in ipaddress.IPv4Network("10.19.0.0/20"):
+                raise ValueError(f"нет WireGuard-адреса для слота {slot!r}")
         if not (isinstance(slot, int) and 1 <= slot <= 100000 and valid_key(pub) and valid_key(psk)
                 and isinstance(ip, str) and IP_RE.match(ip) and all(0 <= int(o) <= 255 for o in ip.split("."))):
             raise ValueError(f"некорректный пир в peers.json: слот {slot!r}")
@@ -97,7 +103,7 @@ def apply_live():
     strip = subprocess.run([AWG_QUICK, "strip", IFACE], capture_output=True, text=True)
     if strip.returncode != 0:
         raise RuntimeError("awg-quick strip: " + strip.stderr.strip())
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as tf:
+    with tempfile.NamedTemporaryFile("w", dir=CONF_DIR, suffix=".conf", delete=False) as tf:
         tf.write(strip.stdout)
     try:
         r = subprocess.run([AWG, "syncconf", IFACE, tf.name], capture_output=True, text=True)
@@ -119,10 +125,9 @@ def main():
         return 1
     conf = CONF_DIR / f"{IFACE}.conf"
     new = compose(base, peers)
-    if conf.exists() and conf.read_text() == new:
-        return 0
-    write_atomic(conf, new)
-    log(f"записан {conf}: пиров {len(peers)}")
+    if not conf.exists() or conf.read_text() != new:
+        write_atomic(conf, new)
+        log(f"записан {conf}: пиров {len(peers)}")
     try:
         apply_live()
     except (RuntimeError, OSError) as e:

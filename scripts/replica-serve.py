@@ -55,6 +55,12 @@ def export(domain):
                     tar.add(d, arcname=f"etc/letsencrypt/{sub}/{domain}")
 
 
+def export_tls(domain):
+    with tarfile.open(fileobj=sys.stdout.buffer, mode="w|gz", dereference=True) as tar:
+        for name in ("fullchain.pem", "privkey.pem"):
+            tar.add(LE / "live" / domain / name, arcname=name, recursive=False)
+
+
 def import_traffic(peer, prefix="traffic"):
     raw = sys.stdin.buffer.read(MAX_TRAFFIC + 1)
     if len(raw) > MAX_TRAFFIC:
@@ -80,6 +86,8 @@ def main():
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "").strip()
     if cmd == "export":
         export(sys.argv[2])
+    elif cmd == "export-tls":
+        export_tls(sys.argv[2])
     elif cmd == "import-traffic":
         import_traffic(sys.argv[1])
     elif cmd == "import-traffic-xray":

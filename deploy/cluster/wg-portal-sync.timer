@@ -1,0 +1,10 @@
+[Unit]
+Description=Update plain WireGuard peers from the portal
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=15s
+AccuracySec=3s
+
+[Install]
+WantedBy=timers.target

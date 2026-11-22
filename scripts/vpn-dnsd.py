@@ -7,12 +7,15 @@
 
 Конфиг: /etc/vpn-dnsd.json (пример в deploy/vpn-dnsd.json.example). Нужен пакет python3-dnslib.
 """
+import http.client
 import json
 import random
 import socket
+import ssl
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from dnslib import A, NS, QTYPE, RCODE, RR, SOA
 from dnslib.server import BaseResolver, DNSServer
@@ -22,50 +25,73 @@ cfg = json.load(open(CONF))
 ZONE = cfg["zone"].rstrip(".").lower()
 TTL = int(cfg.get("ttl", 30))
 SERVERS = cfg["servers"]            # [{"name","ip","port":443}]
+WG_NAME = "wg." + ZONE
+WG_SERVERS = cfg.get("wireguard_servers", [])
 NS_NAMES = cfg["ns"]
 INTERVAL = float(cfg.get("interval", 5))
 FAILS = int(cfg.get("fails", 4))
 RATE = float(cfg.get("rate_per_sec", 100))
 
-state = {s["ip"]: True for s in SERVERS}
-fail_count = {s["ip"]: 0 for s in SERVERS}
+def address(s):
+    return s["ip"], int(s.get("port", 443))
+
+
+def health_key(s):
+    return address(s), bool(s.get("portal_health"))
+
+
+targets = {health_key(s): s for s in SERVERS + WG_SERVERS}
+state = dict.fromkeys(targets, True)
+fail_count = dict.fromkeys(targets, 0)
 lock = threading.Lock()
 
 
 def probe(s):
     try:
-        with socket.create_connection((s["ip"], int(s.get("port", 443))), timeout=2):
-            return True
-    except OSError:
+        with socket.create_connection(address(s), timeout=2) as conn:
+            if not s.get("portal_health"):
+                return True
+            with ssl.create_default_context().wrap_socket(conn, server_hostname=ZONE) as tls:
+                tls.settimeout(8)
+                tls.sendall(f"GET /healthz HTTP/1.1\r\nHost: {ZONE}\r\nConnection: close\r\n\r\n".encode("ascii"))
+                with http.client.HTTPResponse(tls) as response:
+                    response.begin()
+                    return response.status == 200 and response.read(3) == b"OK\n"
+    except (OSError, http.client.HTTPException):
         return False
 
 
 def health_loop():
-    while True:
-        for s in SERVERS:
-            ok = probe(s)
-            with lock:
-                if ok:
-                    fail_count[s["ip"]] = 0
-                    if not state[s["ip"]]:
-                        print(f"[health] {s['name']} {s['ip']} снова доступен", flush=True)
-                    state[s["ip"]] = True
-                else:
-                    fail_count[s["ip"]] += 1
-                    if fail_count[s["ip"]] >= FAILS and state[s["ip"]]:
-                        state[s["ip"]] = False
-                        print(f"[health] {s['name']} {s['ip']} недоступен", flush=True)
-        time.sleep(INTERVAL)
+    with ThreadPoolExecutor(max_workers=min(len(targets), 8)) as checks:
+        while True:
+            for endpoint, ok in zip(targets, checks.map(probe, targets.values())):
+                update_health(endpoint, ok)
+            time.sleep(INTERVAL)
 
 
-def alive_ips():
+def update_health(endpoint, ok):
+    s = targets[endpoint]
+    with lock:
+        if ok:
+            fail_count[endpoint] = 0
+            if not state[endpoint]:
+                print(f"[health] {s['name']} {s['ip']} снова доступен", flush=True)
+            state[endpoint] = True
+        else:
+            fail_count[endpoint] += 1
+            if fail_count[endpoint] >= FAILS and state[endpoint]:
+                state[endpoint] = False
+                print(f"[health] {s['name']} {s['ip']} недоступен", flush=True)
+
+
+def alive_ips(servers):
     """Живые основные серверы; резервные ("backup": true) отдаются, только если ни один основной не жив."""
     with lock:
-        alive = [s for s in SERVERS if state[s["ip"]]]
+        alive = [s for s in servers if state[health_key(s)]]
     main = [s["ip"] for s in alive if not s.get("backup")]
     if main:
         return main
-    return [s["ip"] for s in alive] or [s["ip"] for s in SERVERS]
+    return [s["ip"] for s in alive] or [s["ip"] for s in servers]
 
 
 class Bucket:
@@ -109,12 +135,21 @@ class Resolver(BaseResolver):
             reply.header.aa = 0
             reply.header.rcode = RCODE.REFUSED
             return reply
+        if name == WG_NAME and WG_SERVERS:
+            if qtype == "A":
+                ips = alive_ips(WG_SERVERS)
+                random.shuffle(ips)
+                for ip in ips:
+                    reply.add_answer(RR(WG_NAME, QTYPE.A, ttl=TTL, rdata=A(ip)))
+            else:
+                reply.add_auth(self.soa())
+            return reply
         if name != ZONE:
             reply.header.rcode = RCODE.NXDOMAIN
             reply.add_auth(self.soa())
             return reply
         if qtype == "A":
-            ips = alive_ips()
+            ips = alive_ips(SERVERS)
             random.shuffle(ips)  # равномерно распределяет новые подключения между живыми серверами
             for ip in ips:
                 reply.add_answer(RR(ZONE, QTYPE.A, ttl=TTL, rdata=A(ip)))
