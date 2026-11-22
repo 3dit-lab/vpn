@@ -9,7 +9,15 @@ trap 'rm -rf -- "$work"' EXIT
 case "$site" in
     fi-2)
         paths=(/etc/nginx/vpn-portal-primary.inc)
-        sed 's@proxy_pass https://fi-1-vpn.3dit.ru;@proxy_pass https://10.77.240.1;@' "${paths[0]}" >"$work/0"
+        cat >"$work/0" <<'NGINX'
+proxy_pass https://10.77.240.1;
+proxy_set_header Host vpn.3dit.ru;
+proxy_ssl_server_name on;
+proxy_ssl_name vpn.3dit.ru;
+proxy_ssl_verify on;
+proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+proxy_connect_timeout 3s;
+NGINX
         ;;
     ee-1)
         paths=(/etc/nginx/conf.d/vpn-ee-1-https.conf /etc/nginx/conf.d/vpn-ee-1-shared.conf)
