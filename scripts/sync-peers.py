@@ -103,7 +103,7 @@ def apply_live():
     strip = subprocess.run([AWG_QUICK, "strip", IFACE], capture_output=True, text=True)
     if strip.returncode != 0:
         raise RuntimeError("awg-quick strip: " + strip.stderr.strip())
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as tf:
+    with tempfile.NamedTemporaryFile("w", dir=CONF_DIR, suffix=".conf", delete=False) as tf:
         tf.write(strip.stdout)
     try:
         r = subprocess.run([AWG, "syncconf", IFACE, tf.name], capture_output=True, text=True)
@@ -128,8 +128,6 @@ def main():
     if not conf.exists() or conf.read_text() != new:
         write_atomic(conf, new)
         log(f"записан {conf}: пиров {len(peers)}")
-    elif not PLAIN_WG:
-        return 0
     try:
         apply_live()
     except (RuntimeError, OSError) as e:

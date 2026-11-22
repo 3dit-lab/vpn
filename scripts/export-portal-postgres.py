@@ -51,15 +51,18 @@ def read_configs(directory):
     return configs
 
 
-def export(source, configs, out):
+def export(source, configs, out, replace_unpublished=False):
     assigned = {r[0] for r in source.execute("SELECT slot FROM assignments")}
     if assigned - configs.keys():
         raise ValueError("Assigned slot missing from the config pool")
     print("BEGIN;", file=out)
     tables = [*TABLES, "portal_configs"]
     print(f"LOCK TABLE {', '.join(tables)} IN ACCESS EXCLUSIVE MODE;", file=out)
-    populated = " OR ".join(f"EXISTS (SELECT 1 FROM {t})" for t in tables)
-    print(f"DO $$ BEGIN IF {populated} THEN RAISE EXCEPTION 'Target is not empty'; END IF; END $$;", file=out)
+    if replace_unpublished:
+        print(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY;", file=out)
+    else:
+        populated = " OR ".join(f"EXISTS (SELECT 1 FROM {t})" for t in tables)
+        print(f"DO $$ BEGIN IF {populated} THEN RAISE EXCEPTION 'Target is not empty'; END IF; END $$;", file=out)
     copy_rows(out, "portal_configs", "slot body", sorted(configs.items()))
     for table, columns in TABLES.items():
         fields = ", ".join(columns.split())
@@ -74,12 +77,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot", type=Path)
     parser.add_argument("configs", type=Path)
+    parser.add_argument("--replace-unpublished", action="store_true")
     args = parser.parse_args()
     with sqlite3.connect(args.snapshot.resolve().as_uri() + "?mode=ro", uri=True) as db:
         db.execute("BEGIN")
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok" or db.execute("PRAGMA foreign_key_check").fetchone():
             raise ValueError("Invalid SQLite snapshot")
-        export(db, read_configs(args.configs), sys.stdout)
+        export(db, read_configs(args.configs), sys.stdout, args.replace_unpublished)
 
 
 if __name__ == "__main__":

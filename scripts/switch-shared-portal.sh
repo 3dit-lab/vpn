@@ -25,7 +25,7 @@ preflight() {
     test ! -e "$env"
     test ! -e "$dropin"
     test -x /opt/vpn-portal-shared/python
-    /opt/vpn-portal-shared/python -c 'import psycopg, flask, gunicorn'
+    /opt/vpn-portal-shared/python -c 'import psycopg, flask; from gunicorn.app.wsgiapp import run'
     systemctl is-active --quiet vpn-portal
     systemctl is-active --quiet wg-quick@wg-portal
     systemctl is-active --quiet awg-quick@awg0
@@ -65,7 +65,7 @@ case "$mode" in
 EnvironmentFile=/etc/vpn-portal-shared.env
 WorkingDirectory=/opt/vpn-portal-shared
 ExecStart=
-ExecStart=/opt/vpn-portal-shared/python -m gunicorn --workers 2 --bind 127.0.0.1:8081 portal:app
+ExecStart=/opt/vpn-portal-shared/python -c "from gunicorn.app.wsgiapp import run; run()" --workers 2 --bind 127.0.0.1:8081 portal:app
 UNIT
         chmod 0644 "$dropin"
         if [ "$site" = ee-1 ]; then
@@ -85,7 +85,8 @@ UNIT
             test "$i" -lt 20
             sleep 1
         done
-        systemctl start vpn-portal-peers.service vpn-peer-sync.service wg-portal-sync.service
+        systemctl start vpn-portal-peers.service
+        systemctl start vpn-peer-sync.service wg-portal-sync.service
         wg show wg-portal peers | wc -l
         awg show awg0 peers | wc -l
         printf '%s\n' "Active behind maintenance: $site"

@@ -46,7 +46,7 @@ pg() {
     docker exec -i -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE -e PGTARGETSESSIONATTRS \
         -e PGCONNECT_TIMEOUT -e PGPASSWORD pm-vpn-postgres psql -v ON_ERROR_STOP=1 "$@"
 }
-python3 "$src/export-portal-postgres.py" "$d/merged" "$wgconfigs" | pg >/dev/null
+python3 "$src/export-portal-postgres.py" "$d/merged" "$wgconfigs" "$@" | pg >/dev/null
 pg -Atc "SELECT (SELECT COUNT(*) FROM people), (SELECT COUNT(*) FROM assignments), (SELECT COUNT(*) FROM portal_configs)"
 python3 - "$d/merged" <<'PY'
 import psycopg, sqlite3, sys
