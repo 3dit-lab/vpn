@@ -988,6 +988,7 @@ def blocked(kind, ip_limit, all_limit=None):
 def auth_fail(kind):
     """Запись для fail2ban о неудачной попытке входа."""
     auth_log.info("AUTHFAIL ip=%s kind=%s", client_ip(), kind)
+    g.vpn_auth_failed = True
 
 
 FONT_PATHS = [
@@ -1086,6 +1087,8 @@ def page(template, **ctx):
 
 @app.after_request
 def headers(resp):
+    if g.get("vpn_auth_failed", False):
+        resp.headers["X-VPN-Auth-Failure"] = "1"
     resp.headers["Cache-Control"] = "no-store"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
