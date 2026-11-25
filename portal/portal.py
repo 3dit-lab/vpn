@@ -164,6 +164,11 @@ body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,
 main { max-width:680px; margin:0 auto; padding:16px; }
 main.wide { max-width:1150px; }
 h1 { font-size:22px; margin:8px 0 4px; }
+.portal-head { padding:clamp(16px,4vw,24px); margin:0 0 16px; border-radius:16px; color:#fff; background:radial-gradient(ellipse at 98% 20%, #245dac 0%, transparent 64%), #132547; }
+.portal-head h1 { font-size:clamp(24px,5vw,32px); line-height:1.15; margin:4px 0; }
+.portal-head p { margin:0; color:#dceaff; }
+.portal-head a { display:inline-block; margin-top:10px; color:#fff; font-weight:600; text-underline-offset:.2em; }
+.portal-head a:focus-visible { outline:2px solid #fff; outline-offset:3px; }
 h2 { font-size:17px; margin:0 0 8px; }
 a { color:var(--accent); }
 .sub { color:var(--muted); margin:0 0 16px; }
@@ -271,8 +276,11 @@ TEMPLATES = {
 
     "login.html": """{% extends "base.html" %}
 {% block content %}
-<h1>Доступ к VPN</h1>
-<p class="sub">ООО «Тридит»</p>
+<header class="portal-head">
+  <p>ООО «Тридит»</p>
+  <h1>Доступ к VPN</h1>
+  <a href="/apps/">Приложения для VPN</a>
+</header>
 <div class="card">
   <form method="post" action="/login" autocomplete="on">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -291,8 +299,11 @@ TEMPLATES = {
 
     "dashboard.html": """{% extends "base.html" %}
 {% block content %}
-<h1>Доступ к VPN</h1>
-<p class="sub">{{ org_name }} · {{ name }} · {{ phone }}</p>
+<header class="portal-head">
+  <h1>Доступ к VPN</h1>
+  <p>{{ org_name }} · {{ name }} · {{ phone }}</p>
+  <a href="/apps/">Приложения для VPN</a>
+</header>
 
 <div class="warn">Конфиг личный: не пересылайте его другим людям. Один конфиг работает только на одном устройстве. Для каждого следующего устройства получите отдельный конфиг ниже.</div>
 
@@ -345,6 +356,7 @@ TEMPLATES = {
   <div class="app" data-os="mac"><span>macOS</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
   <div class="app" data-os="linux"><span>Linux</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
   <p><small>На iPhone Amnezia VPN в российском App Store недоступен, поэтому используется DefaultVPN. На остальных системах ставится Amnezia VPN.</small></p>
+  <p>Для файла WireGuard (.conf) <a href="/apps/#wireguard">скачайте WireGuard</a>.</p>
   {% if xray %}<p><small>Если VPN не подключается (например, в мобильной сети), используйте приложение <b>Happ</b>: нажмите «Ссылка для Happ», в Happ добавьте её из буфера обмена. Файлы Happ для Windows, macOS и Linux — на странице <a href="/apps/">приложений</a>, для телефонов — в App Store / Google Play.</small></p>{% endif %}
 </div>
 
