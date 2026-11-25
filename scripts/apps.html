@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Приложения для VPN · 3DIT</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #edf2f8;
+  --surface: #fff;
+  --text: #13223a;
+  --muted: #475b72;
+  --line: #c9d6e5;
+  --link: #124e9e;
+  --button: #1756a3;
+  --focus: #2264b7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101725;
+    --surface: #192437;
+    --text: #eff5ff;
+    --muted: #bdcce1;
+    --line: #3a4b64;
+    --link: #a6ccff;
+    --button: #245dac;
+    --focus: #9dcaff;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 1rem; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+main { width: min(100% - 2rem, 940px); margin: 0 auto; padding: 1.25rem 0 3rem; }
+a { color: var(--link); text-underline-offset: .2em; }
+a:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+.brand { font-weight: 750; letter-spacing: .06em; }
+.hero {
+  padding: clamp(1.25rem, 4vw, 2.75rem);
+  border-radius: 1.25rem;
+  color: #fff;
+  background: radial-gradient(ellipse at 98% 20%, #245dac 0%, transparent 64%), #132547;
+}
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(1.65rem, 5vw, 2.65rem); line-height: 1.12; }
+.hero p { margin-top: .75rem; max-width: 46ch; color: #dceaff; }
+nav { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0 1.75rem; }
+nav a {
+  padding: .5rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 650;
+  text-decoration: none;
+}
+section + section { margin-top: 2rem; }
+section:target h2 { color: var(--link); }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1rem; }
+.version { display: inline-block; font-size: .75rem; font-weight: 500; color: var(--muted); vertical-align: middle; }
+.subtitle { color: var(--muted); margin: .2rem 0 .75rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 195px), 1fr)); gap: .75rem; }
+.download {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: .9rem;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.download.recommended { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.download p { color: var(--muted); font-size: .875rem; padding: .25rem 0 .8rem; }
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+  margin-top: auto;
+  padding: .45rem .8rem;
+  border-radius: .55rem;
+  background: var(--button);
+  color: #fff;
+  text-decoration: none;
+  font-size: .9rem;
+  font-weight: 650;
+}
+.button:hover, nav a:hover { text-decoration: underline; }
+.download .alternative { margin-top: .55rem; font-size: .875rem; }
+details { margin-top: .8rem; }
+summary { color: var(--link); width: fit-content; cursor: pointer; }
+details .grid { margin-top: .65rem; }
+.sources { margin-top: .8rem; color: var(--muted); font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="top"><span class="brand">3DIT VPN</span><a href="/">Личный кабинет</a></div>
+  <div class="hero">
+    <h1>Приложения для VPN</h1>
+    <p>Установите приложение для своего устройства и импортируйте подходящий конфиг из личного кабинета.</p>
+  </div>
+</header>
+<nav aria-label="Приложения">$nav</nav>
+$primary
+<section id="wireguard">
+  <h2>WireGuard</h2>
+  <p class="subtitle">Для конфигов WireGuard (.conf) из личного кабинета.</p>
+  <div class="grid">
+    <article class="download" data-os="windows">
+      <h3>Windows</h3><p>Официальный установщик</p>
+      <a class="button" aria-label="Скачать WireGuard для Windows" href="https://download.wireguard.com/windows-client/wireguard-installer.exe">Скачать .exe</a>
+    </article>
+    <article class="download" data-os="mac">
+      <h3>macOS</h3><p>Официальное приложение</p>
+      <a class="button" aria-label="WireGuard для macOS в App Store" href="https://apps.apple.com/app/id1451685025">Открыть App Store</a>
+    </article>
+    <article class="download" data-os="android">
+      <h3>Android</h3><p>Официальное приложение</p>
+      <a class="button" aria-label="WireGuard для Android в Google Play" href="https://play.google.com/store/apps/details?id=com.wireguard.android">Открыть Google Play</a>
+      <a class="alternative" href="https://download.wireguard.com/android-client/">APK от разработчика</a>
+    </article>
+    <article class="download" data-os="ios">
+      <h3>iPhone / iPad</h3><p>Официальное приложение</p>
+      <a class="button" aria-label="WireGuard для iPhone и iPad в App Store" href="https://apps.apple.com/app/id1441195209">Открыть App Store</a>
+    </article>
+    <article class="download" data-os="linux">
+      <h3>Linux</h3><p>Пакеты для дистрибутивов</p>
+      <a class="button" href="https://www.wireguard.com/install/">Как установить</a>
+    </article>
+  </div>
+</section>
+$secondary
+</main>
+<script>
+(function () {
+  var ua = navigator.userAgent || "", platform = navigator.platform || "", os = "";
+  if (/iPhone|iPad|iPod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1)) os = "ios";
+  else if (/Android/.test(ua)) os = "android";
+  else if (/Windows/.test(ua)) os = "windows";
+  else if (/Mac/.test(ua) || /Mac/.test(platform)) os = "mac";
+  else if (/Linux|X11/.test(ua)) os = "linux";
+  if (os) document.querySelectorAll('.download[data-os="' + os + '"]').forEach(function (card) {
+    card.classList.add("recommended");
+  });
+})();
+</script>
+</body>
+</html>
