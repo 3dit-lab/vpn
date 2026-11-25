@@ -132,6 +132,10 @@ def main():
     check("super: неверный пароль", "Неверный пароль" in x.super_login(sc, "wrongpass99").get_data(as_text=True))
     r = x.super_login(sc)
     check("super: вход", "Организации" in r.get_data(as_text=True))
+    admin_events = d / "logs" / "admin-login.jsonl"
+    events = [json.loads(line) for line in admin_events.read_text().splitlines()]
+    check("audit: только успешный вход супер-администратора",
+          len(events) == 1 and events[0]["role"] == "super" and events[0]["srcip"] == "10.1.0.1")
 
     # ---------- создание организаций
     pw_a = create_org(x, sc, "Альфа", "alfa", "2", "11111")
@@ -163,6 +167,8 @@ def main():
     e1 = x.client()
     r = x.emp_login(e1, "11111")
     check("emp: вход по коду Альфы", "Альфа" in r.get_data(as_text=True))
+    check("audit: вход сотрудника не попадает в очередь уведомлений администратора",
+          len(admin_events.read_text().splitlines()) == 1)
     with p.app.app_context():
         logins = p.audit_rows(x.org("alfa")["id"])
         check("audit: успешный вход сотрудника с замаскированным телефоном",
@@ -240,6 +246,9 @@ def main():
     r = x.org_login(oc, "alfa", pw_a)
     html = r.get_data(as_text=True)
     check("orgadmin: вход", "Альфа" in html and "11111" in html)
+    last_event = json.loads(admin_events.read_text().splitlines()[-1])
+    check("audit: вход администратора организации содержит роль и организацию",
+          last_event["role"] == "org" and last_event["organization"] == "alfa")
     check("orgadmin: не видит других организаций", "Бета" not in html and "22222" not in html)
     check("orgadmin: не пускают в /super", oc.get("/super").status_code == 302)
     check("orgadmin: экспорт CSV", oc.get("/org/export.csv").status_code == 200)
