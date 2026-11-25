@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Скачивает последние ОФИЦИАЛЬНЫЕ релизы клиентов Amnezia и Happ с GitHub в каталог раздачи,
+# Скачивает последние ОФИЦИАЛЬНЫЕ релизы клиентов Amnezia и Happ с GitHub и установщик WireGuard для Windows в каталог раздачи,
 # проверяет SHA256 (если GitHub отдаёт digest), пишет SHA256SUMS и обновляет /apps/index.html.
 # Файлы не изменяются и не пересобираются. Запускайте вручную, когда хотите обновить приложения:
 # автоматическое скачивание без проверки на сервере, раздающем файлы сотрудникам, не настроено намеренно.
@@ -55,5 +55,7 @@ for repo in $REPOS; do
 
 done
 
-python3 "$(dirname -- "${BASH_SOURCE[0]}")/render-apps.py" "$APPS_DIR" $REPOS
+script_dir="$(dirname -- "${BASH_SOURCE[0]}")"
+"$script_dir/fetch-wireguard-windows.sh" "$APPS_DIR"
+python3 "$script_dir/render-apps.py" "$APPS_DIR" $REPOS
 echo "Готово: $APPS_DIR"
