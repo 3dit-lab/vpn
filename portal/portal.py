@@ -1501,6 +1501,12 @@ def login():
         if not person["name"] and name:
             c.execute("UPDATE people SET name=? WHERE id=?", (name, person["id"]))
         log.info("login: вход %s (%s)", mask_phone(phone), org["slug"])
+    details = f"{org['slug']} · IP {client_ip()}"
+    if not person:
+        details += " · первый вход"
+    if from_guard:
+        details += " · из Guard"
+    audit(f"user {mask_phone(phone)}", "вход", details, org["id"])
     session.clear()
     session.permanent = True
     session["org"] = org["id"]
@@ -1822,7 +1828,7 @@ def org_login():
         flash("Неверный логин или пароль.", "err")
         return redirect("/org/login")
     start_admin_session("org", admin_org=org["id"])
-    audit(f"admin {org['slug']}", "вход", "", org["id"])
+    audit(f"admin {org['slug']}", "вход", f"IP {client_ip()}", org["id"])
     return redirect("/org")
 
 
