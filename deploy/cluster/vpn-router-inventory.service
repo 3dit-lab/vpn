@@ -1,0 +1,18 @@
+[Unit]
+Description=Publish VPN router profile inventory from the local Guard gateway
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/vpn-portal-shared.env
+ConditionPathExists=/etc/wg-mt/peers.tsv
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/vpn-portal-shared.env
+WorkingDirectory=/opt/vpn-portal-shared
+ExecStart=/opt/vpn-portal-shared/python /opt/vpn-portal-shared/router_gateway_inventory.py
+TimeoutStartSec=30
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+CapabilityBoundingSet=
