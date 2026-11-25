@@ -20,6 +20,7 @@ with psycopg.connect(dbname="postgres", autocommit=True, **params) as db:
 with psycopg.connect(dbname="pm_vpn", autocommit=True, **params) as db:
     if db.execute("SELECT to_regclass('portal_configs')").fetchone()[0] is None:
         db.execute((ROOT / "deploy/cluster/schema.sql").read_text())
+    db.execute((ROOT / "deploy/cluster/router-gateway-inventory.sql").read_text())
     db.execute("REVOKE ALL ON DATABASE pm_vpn FROM PUBLIC")
     db.execute("GRANT CONNECT ON DATABASE pm_vpn TO vpnportal")
     db.execute("GRANT USAGE ON SCHEMA public TO vpnportal")

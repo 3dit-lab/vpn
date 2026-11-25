@@ -92,6 +92,7 @@ DB_PATH = DATA_DIR / "portal.db"
 SHARED_DSN = os.environ.get("PORTAL_DB_DSN")
 if SHARED_DSN:
     import postgres_backend
+    import router_gateway_inventory
 ADMIN_SESSION_SECONDS = 8 * 3600
 MAX_ORG_LIMIT = 10000
 DEFAULT_ORG_LIMIT = 10
@@ -208,6 +209,78 @@ th { color:var(--muted); font-weight:600; white-space:nowrap; }
 .bar.full > i { background:var(--errfg); }
 .inline { display:inline; }
 code { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:14px; }
+/* Overview for the VPN super administrator */
+.admin-overview { padding-block:24px 40px; }
+.admin-overview .portal-head {
+  padding:clamp(20px,4vw,36px);
+  background:radial-gradient(ellipse at 90% 15%, #245dac, transparent 70%), linear-gradient(110deg,#101d39,#172f53);
+}
+.admin-overview .portal-head h1 { margin:8px 0; font-size:clamp(24px,5vw,36px); }
+.admin-overview .admin-brand { font-size:13px; font-weight:750; letter-spacing:.08em; }
+.admin-header-row, .admin-section-head {
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px 16px;
+}
+.admin-overview .portal-head form { margin:0; }
+.admin-overview .portal-head .btn {
+  margin:0; color:#fff; border:1px solid #a9c5e8; background:#142c4e;
+}
+.admin-pool { margin-top:20px; max-width:32rem; }
+.admin-pool meter {
+  display:block; appearance:none; width:100%; height:12px; margin-top:6px; background:none;
+}
+.admin-pool meter::-webkit-meter-bar { background:#47628a; border:0; border-radius:99px; }
+.admin-pool meter::-webkit-meter-optimum-value { background:#94c4ff; border-radius:99px; }
+.admin-pool meter::-moz-meter-bar { background:#94c4ff; border-radius:99px; }
+.admin-nav { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+.admin-nav a {
+  display:inline-flex; align-items:center; min-height:40px; padding:6px 12px;
+  border:1px solid var(--line); border-radius:99px; background:var(--card); font-weight:650; text-decoration:none;
+}
+.admin-nav a:hover { border-color:var(--accent); text-decoration:underline; }
+.admin-overview .stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); margin-bottom:16px; }
+.admin-overview .stat { display:flex; flex-direction:column; gap:4px; padding:12px 14px; color:var(--muted); font-size:13px; }
+.admin-overview .stat b { color:var(--fg); font-size:clamp(21px,3vw,30px); line-height:1.15; font-variant-numeric:tabular-nums; }
+.admin-overview .stat.available { border-color:var(--okfg); background:var(--ok); color:var(--okfg); }
+.admin-overview .stat.available b { color:inherit; }
+.admin-overview .card { padding:clamp(12px,2vw,20px); margin-bottom:16px; }
+.admin-overview .primary { background:#245dac; color:#fff; }
+.admin-overview :where(a, button, input, .scroll):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.admin-overview .portal-head .btn:focus-visible { outline-color:white; }
+.admin-overview :where(section) { scroll-margin-top:16px; }
+.admin-section-head h2 { margin:0; }
+.admin-section-head { margin-bottom:12px; }
+.admin-table { min-width:850px; font-variant-numeric:tabular-nums; }
+.admin-table th { background:var(--bg); }
+.admin-table :is(th,td) { vertical-align:middle; }
+.admin-table tbody tr:hover { background:var(--bg); }
+.admin-table tbody :is(th,td) { padding-block:10px; }
+.admin-table tbody th { background:transparent; color:var(--fg); white-space:normal; overflow-wrap:anywhere; }
+.admin-table .capacity { min-width:95px; }
+.admin-limit-controls, .admin-limit-controls .inline {
+  display:flex; align-items:center; flex-wrap:wrap; gap:4px;
+}
+.admin-limit-controls input[type=number] { width:5.25rem; padding:4px 6px; }
+.admin-create { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; align-items:end; }
+.admin-create-footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:14px; }
+.admin-create-footer .btn { width:auto; margin:0; }
+.admin-create-footer small { overflow-wrap:anywhere; }
+.admin-overview .admin-backup { display:flex; justify-content:space-between; flex-wrap:wrap; align-items:center; gap:12px; }
+.admin-backup p { margin:0; color:var(--muted); }
+.admin-backup .btn { margin:0; width:auto; }
+.router-gateways { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; list-style:none; padding:0; }
+.router-gateways li { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:4px 8px; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:8px 10px; }
+.router-profile-table { min-width:420px; }
+.router-profile-table tbody th { color:var(--fg); white-space:normal; overflow-wrap:anywhere; }
+.admin-scroll-hint { display:none; margin:0 0 8px; color:var(--muted); }
+@media (max-width:920px) { .admin-scroll-hint { display:block; } }
+@media (max-width:700px) {
+  .admin-overview .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .admin-create { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:390px) {
+  .admin-overview .stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .admin-create { grid-template-columns:1fr; }
+}
 """
 
 PEOPLE_TABLE = """<div class="scroll"><table>
@@ -456,42 +529,70 @@ TEMPLATES = {
 
     "super.html": """{% extends "base.html" %}
 {% block title %}Общий администратор{% endblock %}
-{% block cls %}wide{% endblock %}
+{% block cls %}wide admin-overview{% endblock %}
 {% block content %}
-<h1>Общий администратор</h1>
-<p class="sub">Организации, коды доступа, лимиты ключей</p>
+<header class="portal-head">
+  <div class="admin-header-row">
+    <p class="admin-brand">3DIT VPN</p>
+    <form method="post" action="/super/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn sm" type="submit">Выйти</button>
+    </form>
+  </div>
+  <h1>Общий администратор</h1>
+  <p>Управление организациями и ключами VPN</p>
+  {% if pool.total %}
+  <div class="admin-pool">
+    <p id="pool-usage">Сотрудникам выдано {{ pool.assigned }} из {{ pool.total }} ключей</p>
+    <meter min="0" max="{{ pool.total }}" value="{{ pool.assigned }}" aria-labelledby="pool-usage"></meter>
+  </div>
+  {% endif %}
+</header>
+<nav class="admin-nav" aria-label="Разделы управления">
+  <a href="#organizations">Организации</a>
+  <a href="#create-organization">Добавить организацию</a>
+  {% if router_inventory %}<a href="#router-vpn">VPN роутеров</a>{% endif %}
+  <a href="#backup">Резервная копия</a>
+  {% if audit %}<a href="#audit">Журнал действий</a>{% endif %}
+</nav>
 <div class="stats">
-  <div class="stat"><b>{{ pool.total }}</b>ключей в пуле</div>
-  <div class="stat"><b>{{ pool.assigned }}</b>выдано</div>
-  <div class="stat"><b>{{ pool.free }}</b>свободно в пуле</div>
-  <div class="stat"><b>{{ pool.limits }}</b>сумма лимитов организаций</div>
-  <div class="stat"><b>{{ orgs|length }}</b>организаций</div>
+  <div class="stat"><b>{{ pool.total }}</b>Ключей в пуле</div>
+  <div class="stat"><b>{{ pool.assigned }}</b>Выдано</div>
+  <div class="stat{% if pool.free > 10 %} available{% endif %}"><b>{{ pool.free }}</b>Свободно</div>
+  <div class="stat"><b>{{ pool.limits }}</b>Сумма лимитов</div>
+  <div class="stat"><b>{{ orgs|length }}</b>Организаций</div>
 </div>
 {% if pool.limits > pool.total %}<div class="warn">Сумма лимитов ({{ pool.limits }}) больше пула ({{ pool.total }}): последним организациям ключей может не хватить. Нужно сгенерировать дополнительные конфиги (см. README).</div>{% endif %}
 {% if pool.free == 0 %}<div class="msg err">Свободных ключей в пуле не осталось.</div>{% elif pool.free <= 10 %}<div class="msg err">В пуле осталось мало свободных ключей: {{ pool.free }}.</div>{% endif %}
 
-<div class="card scroll">
-  <h2>Организации</h2>
-  <table>
-    <tr><th>Организация</th><th>Логин</th><th>Код</th><th>Статус</th><th>Выдано / лимит</th><th>Трафик</th><th>Людей</th><th>Лимит ключей</th><th>Доступ</th></tr>
+<section id="organizations" class="card" aria-labelledby="org-heading">
+  <div class="admin-section-head">
+    <h2 id="org-heading">Организации</h2>
+    <a class="btn secondary sm" href="/super/export.csv">Скачать сводку (CSV)</a>
+  </div>
+  <p class="admin-scroll-hint"><small>Прокрутите таблицу вправо, чтобы увидеть настройки доступа.</small></p>
+  <div class="scroll" tabindex="0" role="region" aria-labelledby="org-heading">
+  <table class="admin-table">
+    <thead><tr><th scope="col">Организация</th><th scope="col">Логин</th><th scope="col">Код</th><th scope="col">Статус</th><th scope="col">Выдано / лимит</th><th scope="col">Трафик</th><th scope="col">Людей</th><th scope="col">Лимит ключей</th><th scope="col">Доступ</th></tr></thead>
+    <tbody>
     {% for o in orgs %}
     <tr>
-      <td><a href="/super/org/{{ o.id }}">{{ o.name }}</a></td>
+      <th scope="row"><a href="/super/org/{{ o.id }}">{{ o.name }}</a></th>
       <td>{{ o.slug }}{% if not o.has_admin %}<br><small class="muted">пароль не задан</small>{% endif %}</td>
       <td><code>{{ o.code }}</code></td>
       <td><span class="badge {{ 'on' if o.enabled else 'off' }}">{{ 'включена' if o.enabled else 'отключена' }}</span></td>
-      <td>{{ o.issued }} / {{ o.key_limit }}<div class="bar{% if o.issued >= o.key_limit %} full{% endif %}"><i style="width:{{ o.percent }}%"></i></div></td>
+      <td class="capacity">{{ o.issued }} / {{ o.key_limit }}<div aria-hidden="true" class="bar{% if o.issued >= o.key_limit %} full{% endif %}"><i style="width:{{ o.percent }}%"></i></div></td>
       <td title="скачано клиентами / отправлено клиентами">{{ fmt_bytes(o.traffic) }}<br><small class="muted">↓ {{ fmt_bytes(o.tx) }} · ↑ {{ fmt_bytes(o.rx) }}</small></td>
       <td>{{ o.people }}</td>
-      <td>
+      <td><div class="admin-limit-controls">
         <form method="post" action="/super/org/{{ o.id }}/limit" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="number" name="limit" value="{{ o.key_limit }}" min="0" max="{{ max_limit }}" style="width:90px;padding:4px 6px" aria-label="Лимит ключей">
+          <input type="number" name="limit" value="{{ o.key_limit }}" min="0" max="{{ max_limit }}" aria-label="Лимит ключей для {{ o.name }}">
           <button class="btn secondary sm" type="submit">Сохранить</button>
         </form>
         <form method="post" action="/super/org/{{ o.id }}/limit" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="delta" value="-10"><button class="btn secondary sm" type="submit">−10</button></form>
         <form method="post" action="/super/org/{{ o.id }}/limit" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="delta" value="10"><button class="btn secondary sm" type="submit">+10</button></form>
-      </td>
+      </div></td>
       <td>
         <form method="post" action="/super/org/{{ o.id }}/toggle" class="inline"{% if o.enabled %} onsubmit="return confirm('Отключить доступ организации «{{ o.name }}»? Её сотрудники потеряют доступ к порталу и к VPN.');"{% endif %}>
           <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -500,34 +601,71 @@ TEMPLATES = {
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="muted">Организаций пока нет. Добавьте первую ниже.</td></tr>
+    <tr><td colspan="9" class="muted">Организаций пока нет. Добавьте первую ниже.</td></tr>
     {% endfor %}
+    </tbody>
   </table>
-  <p><a href="/super/export.csv">Скачать сводку (CSV)</a></p>
-</div>
+  </div>
+</section>
 
-<div class="card">
-  <h2>Добавить организацию</h2>
+<section id="create-organization" class="card" aria-labelledby="create-heading">
+  <h2 id="create-heading">Добавить организацию</h2>
   <form method="post" action="/super/org/create">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="row">
+    <div class="admin-create">
       <div><label for="n">Название</label><input id="n" name="name" type="text" maxlength="80" required></div>
       <div><label for="s">Логин администратора <small>(латиница, цифры, дефис)</small></label><input id="s" name="slug" type="text" maxlength="30" autocapitalize="none" required></div>
       <div><label for="l">Лимит ключей</label><input id="l" name="limit" type="number" min="0" max="{{ max_limit }}" value="{{ default_limit }}"></div>
       <div><label for="c">Код доступа <small>(5 цифр, пусто = случайный)</small></label><input id="c" name="code" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5"></div>
     </div>
-    <button class="btn primary" type="submit">Создать организацию</button>
-    <p><small>Пароль администратора организации создаётся автоматически и показывается один раз.</small></p>
+    <div class="admin-create-footer">
+      <button class="btn primary" type="submit">Создать организацию</button>
+      <small>Пароль администратора создаётся автоматически и показывается один раз.</small>
+    </div>
   </form>
-</div>
+</section>
 
-<div class="card">
-  <h2>Резервная копия для переезда на другой сервер</h2>
-  <p>Зашифрованный файл со всеми ключами (конфигами) и настройками организаций. <a href="/super/backup">Создать копию</a></p>
-</div>
+{% if router_inventory %}
+<section id="router-vpn" class="card" aria-labelledby="router-vpn-heading">
+  <h2 id="router-vpn-heading">VPN роутеров через Guard</h2>
+  <p class="sub">Отдельный пул. Один роутер может занимать по одному слоту на нескольких шлюзах.</p>
+  {% if router_inventory.fresh %}
+  <p><b>{{ router_inventory.routers|length }}</b> роутеров · <b>{{ router_inventory.profiles }}</b> профилей на ответивших шлюзах</p>
+  {% endif %}
+  <ul class="router-gateways">
+    {% for g in router_inventory.gateways %}
+    <li><b>{{ g.title }}</b>
+      {% if g.fresh %}<span>{{ g.count }} профилей</span>
+      {% elif g.collected %}<span class="badge off">Данные устарели</span>
+      {% else %}<span class="badge off">Нет данных</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if router_inventory.routers %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Роутеры и адреса VPN">
+    <table class="router-profile-table">
+      <thead><tr><th scope="col">Роутер</th>{% for g in router_inventory.gateways %}<th scope="col">{{ g.title }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for router in router_inventory.routers %}
+      <tr><th scope="row">{{ router.name }}</th>{% for g in router_inventory.gateways %}<td>
+        {% if router.addresses.get(g.title) %}<code>{{ router.addresses[g.title] }}</code>
+        {% elif not g.fresh %}<small>Нет данных</small>{% else %}—{% endif %}
+      </td>{% endfor %}</tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 
-{% include "audit_table.html" %}
-<form method="post" action="/super/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Выйти</button></form>
+<section id="backup" class="card admin-backup" aria-labelledby="backup-heading">
+  <div>
+    <h2 id="backup-heading">Резервная копия</h2>
+    <p>Зашифрованный файл с ключами и настройками организаций для переезда на другой сервер.</p>
+  </div>
+  <a class="btn secondary sm" href="/super/backup">Создать копию</a>
+</section>
+
+{% if audit %}<section id="audit" aria-label="Журнал действий">{% include "audit_table.html" %}</section>{% endif %}
 {% endblock %}""",
 
     "super_org.html": """{% extends "base.html" %}
@@ -1760,7 +1898,9 @@ def super_home():
     assigned = db().execute("SELECT COUNT(*) FROM assignments").fetchone()[0]
     pool = {"total": total, "assigned": assigned, "free": max(total - assigned, 0),
             "limits": sum(o["key_limit"] for o in orgs)}
-    return page("super.html", orgs=orgs, pool=pool, audit=audit_rows(), max_limit=MAX_ORG_LIMIT, default_limit=DEFAULT_ORG_LIMIT)
+    inventory = router_gateway_inventory.overview(db(), int(time.time())) if SHARED_DSN else None
+    return page("super.html", orgs=orgs, pool=pool, audit=audit_rows(), router_inventory=inventory,
+                max_limit=MAX_ORG_LIMIT, default_limit=DEFAULT_ORG_LIMIT)
 
 
 def _parse_limit(raw):
