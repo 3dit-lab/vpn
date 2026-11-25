@@ -359,19 +359,21 @@ TEMPLATES = {
 {% block content %}
 <header class="portal-head">
   <p>ООО «Тридит»</p>
-  <h1>Доступ к VPN</h1>
+  <h1>{{ "VPN для устройства из Guard" if from_guard else "Доступ к VPN" }}</h1>
   <a href="/apps/">Приложения для VPN</a>
 </header>
 <div class="card">
+  {% if from_guard %}<p>Введите номер телефона и код организации. После входа конфиг сохранится в вашем профиле, когда вы нажмёте «Получить конфиг».</p>{% endif %}
   <form method="post" action="/login" autocomplete="on">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if from_guard %}<input type="hidden" name="from_guard" value="1">{% endif %}
     <label for="code">Код доступа организации (5 цифр)</label>
     <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="off" required>
     <label for="phone">Номер телефона</label>
-    <input id="phone" name="phone" type="tel" inputmode="tel" placeholder="+7 900 000-00-00 или 8 900 000-00-00" autocomplete="tel" required>
+    <input id="phone" name="phone" type="tel" inputmode="tel" placeholder="+7 900 000-00-00 или 8 900 000-00-00" autocomplete="tel"{% if from_guard %} autofocus{% endif %} required>
     <label for="name">Фамилия и имя <small>(при первом входе)</small></label>
     <input id="name" name="name" type="text" maxlength="80" autocomplete="name" value="{{ name or '' }}">
-    {% with refresh_url='/' %}{% include "captcha.html" %}{% endwith %}
+    {% with refresh_url='/?from=guard' if from_guard else '/' %}{% include "captcha.html" %}{% endwith %}
     <button class="btn primary" type="submit"{% if not captcha_id %} disabled{% endif %}>Войти</button>
   </form>
   <p><small>Код доступа вам сообщил администратор вашей организации. Вход по номеру телефона без SMS: телефон нужен только для того, чтобы найти ваши конфиги при повторном входе.</small></p>
@@ -391,7 +393,7 @@ TEMPLATES = {
 <div class="card">
   <h2>Мои конфиги</h2>
   {% for d in devices %}
-  <div class="dev">
+  <div class="dev" id="config-{{ d.slot }}">
     <b>Устройство {{ loop.index }}</b>{% if d.label %} · {{ d.label }}{% endif %}<br>
     <small>Конфиг №{{ '%03d' % d.slot }} · выдан {{ d.at }}</small>
     {% if servers %}<br><label>Сервер
@@ -416,9 +418,21 @@ TEMPLATES = {
   <p class="muted">Конфигов пока нет. Нажмите кнопку ниже, чтобы получить первый.</p>
   {% endfor %}
 
+  <div id="claim-device">
+  {% if from_guard %}
+  <h2>Конфиг для устройства из Guard</h2>
+  <p>Профиль {{ phone }} · {{ org_name }}. Здесь появится новый конфиг. Выданные ранее конфиги доступны в списке выше.</p>
+  {% endif %}
   {% if dev_limit is none or devices|length < dev_limit %}
   <form method="post" action="/claim" onsubmit="return confirm('Получить {{ 'конфиг' if not devices else 'дополнительный конфиг' }}? Он закрепляется за вами.');">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if from_guard %}
+    <input type="hidden" name="from_guard" value="1">
+    {% if not guard_phone_verified %}
+    <label for="claim-phone">Подтвердите номер телефона профиля</label>
+    <input id="claim-phone" type="tel" name="phone" inputmode="tel" autocomplete="tel" required>
+    {% endif %}
+    {% endif %}
     <label for="label">Название устройства <small>(необязательно)</small></label>
     <input id="label" name="label" type="text" maxlength="30" placeholder="например, iPhone">
     <button class="btn primary" type="submit">{% if not devices %}Получить конфиг{% else %}Получить конфиг для устройства {{ devices|length + 1 }}{% endif %}</button>
@@ -426,6 +440,7 @@ TEMPLATES = {
   {% else %}
   <p><small>Выдано максимальное число конфигов ({{ dev_limit }}): такой лимит задал администратор организации.</small></p>
   {% endif %}
+  </div>
   <p><small>Переустановили приложение или сменили телефон? Новый конфиг не нужен: скачайте свой прежний конфиг заново.</small></p>
 </div>
 
@@ -1421,6 +1436,7 @@ def health():
 
 @app.route("/")
 def index():
+    from_guard = request.args.get("from") == "guard"
     person = current_person()
     if person and not person["org_enabled"]:
         session.pop("org", None)
@@ -1428,33 +1444,36 @@ def index():
         flash("Доступ для вашей организации отключён. Обратитесь к администратору организации.", "err")
         person = None
     if not person:
-        return page("login.html", captcha_id=new_captcha())
+        return page("login.html", captcha_id=new_captcha(), from_guard=from_guard)
     rows = db().execute("SELECT slot, label, assigned_at FROM assignments WHERE person_id=? ORDER BY assigned_at, slot",
                         (person["id"],)).fetchall()
     devices = [{"slot": r["slot"], "label": r["label"], "at": fmt(r["assigned_at"]),
                 "wireguard": bool(shared_wg_address(r["slot"]))} for r in rows]
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
+                from_guard=from_guard, guard_phone_verified=session.get("guard_verified_phone") == person["phone"],
                 org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS,
                 wireguard_servers=WG_SERVERS, xray=XRAY_UI and bool(xray_state()))
 
 
 @app.route("/login", methods=["POST"])
 def login():
+    from_guard = request.form.get("from_guard") == "1"
+    landing = "/?from=guard#claim-device" if from_guard else "/"
     if not check_csrf():
         flash("Сессия устарела, попробуйте ещё раз.", "err")
-        return redirect("/")
+        return redirect(landing)
     if blocked("login", LIMIT_LOGIN_IP, LIMIT_LOGIN_ALL) or blocked("captcha", LIMIT_CAPTCHA_IP):
         flash("Слишком много неверных попыток. Подождите около 15 минут и попробуйте снова.", "err")
-        return redirect("/")
+        return redirect(landing)
     phone = normalize_phone(request.form.get("phone"))
     if not phone:
         flash("Введите номер телефона в формате +7… или 8… (10 цифр после кода страны).", "err")
-        return redirect("/")
+        return redirect(landing)
     if not verify_captcha(request.form.get("captcha_id", ""), request.form.get("captcha", "")):
         record_attempt("captcha")
         auth_fail("captcha")
         flash("Неверные символы с картинки. Попробуйте ещё раз.", "err")
-        return redirect("/")
+        return redirect(landing)
     code = re.sub(r"\D", "", request.form.get("code", ""))
     c = db()
     org = c.execute("SELECT * FROM orgs WHERE code=?", (code,)).fetchone() if len(code) == 5 else None
@@ -1463,16 +1482,16 @@ def login():
         auth_fail("code")
         log.info("login: неверный код ip=%s", client_ip())
         flash("Неверный код доступа.", "err")
-        return redirect("/")
+        return redirect(landing)
     if not org["enabled"]:
         flash("Доступ для вашей организации отключён. Обратитесь к администратору организации.", "err")
-        return redirect("/")
+        return redirect(landing)
     name = clean_text(request.form.get("name"), 80)
     person = c.execute("SELECT * FROM people WHERE org_id=? AND phone=?", (org["id"], phone)).fetchone()
     if not person:
         if len(name) < 2:
             flash("При первом входе укажите фамилию и имя.", "err")
-            return redirect("/")
+            return redirect(landing)
         insert = "INSERT INTO people(org_id, phone, name, created_at) VALUES(?,?,?,?)"
         if SHARED_DSN:
             insert += " ON CONFLICT (org_id, phone) DO NOTHING"
@@ -1486,8 +1505,10 @@ def login():
     session.permanent = True
     session["org"] = org["id"]
     session["phone"] = phone
+    if from_guard:
+        session["guard_verified_phone"] = phone
     csrf_token()
-    return redirect("/")
+    return redirect(landing)
 
 
 @app.route("/logout", methods=["POST"])
@@ -1499,17 +1520,23 @@ def logout():
 
 @app.route("/claim", methods=["POST"])
 def claim():
+    from_guard = request.form.get("from_guard") == "1"
+    landing = "/?from=guard#claim-device" if from_guard else "/"
     person = current_person()
     if not person:
-        return redirect("/")
+        return redirect(landing)
     if not check_csrf():
         flash("Сессия устарела, обновите страницу.", "err")
-        return redirect("/")
+        return redirect(landing)
     if not person["org_enabled"]:
-        return redirect("/")
+        return redirect(landing)
     if blocked("claim", LIMIT_CLAIM_IP):
         flash("Слишком много запросов. Попробуйте позже.", "err")
-        return redirect("/")
+        return redirect(landing)
+    if (from_guard and session.get("guard_verified_phone") != person["phone"]
+            and normalize_phone(request.form.get("phone")) != person["phone"]):
+        flash("Номер не совпадает с текущим профилем. Введите его заново или выйдите и войдите в нужный профиль.", "err")
+        return redirect(landing)
     label = clean_text(request.form.get("label"), 30)
     c = db()
     if SHARED_DSN:
@@ -1531,6 +1558,8 @@ def claim():
         taken = {r[0] for r in c.execute("SELECT slot FROM assignments")}
         par = slot_parity()
         free = [s for s in all_slots(c) if s not in taken and (par is None or s % 2 == par)]
+        if from_guard:
+            free = [s for s in free if shared_wg_address(s)]
         problem = None
         if not org or not org["enabled"]:
             problem = "Доступ для вашей организации отключён."
@@ -1540,11 +1569,12 @@ def claim():
             problem = "Лимит ключей вашей организации исчерпан. Обратитесь к администратору организации."
         elif not free:
             log.warning("claim: свободные конфиги в пуле закончились")
-            problem = "Свободные конфиги закончились. Обратитесь к администратору."
+            problem = ("Свободных конфигов WireGuard сейчас нет. Обратитесь к администратору."
+                       if from_guard else "Свободные конфиги закончились. Обратитесь к администратору.")
         if problem:
             c.execute("ROLLBACK")
             flash(problem, "err")
-            return redirect("/")
+            return redirect(landing)
         slot = free[0]
         c.execute("INSERT INTO assignments(slot, person_id, label, assigned_at) VALUES(?,?,?,?)",
                   (slot, person["id"], label, now()))
@@ -1560,6 +1590,9 @@ def claim():
     write_peers(c)
     log.info("claim: %s получил конфиг №%03d", mask_phone(person["phone"]), slot)
     flash(f"Конфиг №{slot:03d} выдан. Скачайте его ниже.", "ok")
+    if from_guard:
+        session.pop("guard_verified_phone", None)
+        return redirect(f"/#config-{slot}")
     return redirect("/")
 
 
