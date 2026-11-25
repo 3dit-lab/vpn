@@ -270,6 +270,13 @@ code { background:var(--bg); border:1px solid var(--line); border-radius:6px; pa
 .router-gateways { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; list-style:none; padding:0; }
 .router-gateways li { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:4px 8px; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:8px 10px; }
 .router-profile-table { min-width:420px; }
+.router-filter { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:end; margin:0 0 12px; }
+.router-filter[hidden] { display:none; }
+.router-filter > label { flex:1 1 11rem; margin:0; }
+.router-filter > label:first-child { flex-basis:16rem; }
+.router-filter :is(input, select) { display:block; min-height:42px; margin-top:4px; }
+.router-filter select { width:100%; border:1px solid var(--line); border-radius:10px; padding:8px 10px; background:var(--bg); color:var(--fg); font:inherit; }
+.router-filter .btn { flex:0 0 auto; width:auto; min-height:42px; margin:0; }
 .router-profile-table tbody th { color:var(--fg); white-space:normal; overflow-wrap:anywhere; }
 .admin-scroll-hint { display:none; margin:0 0 8px; color:var(--muted); }
 @media (max-width:920px) { .admin-scroll-hint { display:block; } }
@@ -642,17 +649,66 @@ TEMPLATES = {
     {% endfor %}
   </ul>
   {% if router_inventory.routers %}
+  <div class="router-filter" hidden>
+    <label>Имя роутера или VPN-адрес
+      <input id="router-search" type="text" placeholder="Например, P63 или 10.9.3.6" autocomplete="off">
+    </label>
+    <label>Шлюз
+      <select id="router-gateway">
+        <option value="">Все шлюзы</option>
+        {% for gateway in router_inventory.gateways %}
+        {% if gateway.fresh %}<option value="{{ gateway.title }}">{{ gateway.title }}</option>{% endif %}
+        {% endfor %}
+      </select>
+    </label>
+    <button id="router-filter-reset" class="btn secondary sm" type="button">Сбросить</button>
+  </div>
   <div class="scroll" tabindex="0" role="region" aria-label="Роутеры и адреса VPN">
     <table class="router-profile-table">
       <thead><tr><th scope="col">Роутер</th>{% for g in router_inventory.gateways %}<th scope="col">{{ g.title }}</th>{% endfor %}</tr></thead>
       <tbody>{% for router in router_inventory.routers %}
-      <tr><th scope="row">{{ router.name }}</th>{% for g in router_inventory.gateways %}<td>
+      <tr data-router="{{ router.name }}"><th scope="row">{{ router.name }}</th>{% for g in router_inventory.gateways %}<td data-gateway="{{ g.title }}" data-address="{{ router.addresses.get(g.title, '') }}">
         {% if router.addresses.get(g.title) %}<code>{{ router.addresses[g.title] }}</code>
         {% elif not g.fresh %}<small>Нет данных</small>{% else %}—{% endif %}
       </td>{% endfor %}</tr>
       {% endfor %}</tbody>
     </table>
   </div>
+  <p id="router-filter-status" class="sub" role="status" hidden></p>
+  <script>
+  (function () {
+    const section = document.getElementById("router-vpn");
+    const filters = section.querySelector(".router-filter");
+    const search = document.getElementById("router-search");
+    const gateway = document.getElementById("router-gateway");
+    const status = document.getElementById("router-filter-status");
+    const rows = [...section.querySelectorAll("[data-router]")];
+    function apply() {
+      const query = search.value.trim().toLowerCase();
+      let count = 0;
+      for (const row of rows) {
+        const addresses = [...row.querySelectorAll("[data-address]")]
+          .filter(cell => cell.dataset.address && (!gateway.value || cell.dataset.gateway === gateway.value));
+        const name = row.dataset.router.toLowerCase();
+        row.hidden = !addresses.length || !(
+          name.includes(query) || addresses.some(cell => cell.dataset.address.includes(query))
+        );
+        if (!row.hidden) count++;
+      }
+      status.hidden = !query && !gateway.value;
+      status.textContent = count ? "Найдено " + count + " из " + rows.length : "Поиск ничего не нашёл.";
+    }
+    search.addEventListener("input", apply);
+    gateway.addEventListener("change", apply);
+    document.getElementById("router-filter-reset").addEventListener("click", function () {
+      search.value = "";
+      gateway.value = "";
+      apply();
+      search.focus();
+    });
+    filters.hidden = false;
+  })();
+  </script>
   {% endif %}
 </section>
 {% endif %}
