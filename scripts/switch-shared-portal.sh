@@ -95,7 +95,7 @@ UNIT
         test -f "$hold"
         test -s "$env"
         systemctl is-active --quiet vpn-portal
-        systemctl enable --now vpn-portal-peers.timer vpn-peer-sync.path vpn-peer-sync.timer wg-portal-sync.timer
+        systemctl enable --now vpn-portal-peers.timer vpn-peer-sync.path vpn-peer-sync.timer wg-portal-sync.timer vpn-router-inventory.timer
         if test -e "$state/replica.timer"; then systemctl disable vpn-replica.timer; fi
         rm -f "$hold"
         printf '%s\n' "Published: $site"
@@ -103,7 +103,7 @@ UNIT
     rollback)
         test -f "$hold" || { echo "Public requests may have reached PostgreSQL; SQLite rollback refused" >&2; exit 1; }
         test -s "$state/nginx"
-        systemctl stop vpn-portal vpn-portal-peers.timer wg-portal-sync.timer
+        systemctl stop vpn-portal vpn-portal-peers.timer wg-portal-sync.timer vpn-router-inventory.timer
         rm -f "$dropin" "$env"
         cp -p "$state/nginx" "$nginx_conf"
         if test -f "$state/peers.json"; then

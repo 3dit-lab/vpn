@@ -5,7 +5,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 dst=/opt/vpn-portal-shared
 install -d -m 0755 "$dst"
-install -m 0644 "$root"/portal/{portal,backup,postgres_backend,wireguard_profile}.py "$dst/"
+install -m 0644 "$root"/portal/{portal,backup,postgres_backend,wireguard_profile,router_gateway_inventory}.py "$dst/"
 install -m 0644 "$root/scripts/sync-peers.py" "$dst/"
 if python3 -c 'import psycopg, gunicorn' 2>/dev/null; then
     ln -sfn /usr/bin/python3 "$dst/python"
@@ -19,7 +19,8 @@ else
 fi
 "$dst/python" -c 'import flask, psycopg, gunicorn, cryptography, PIL'
 "$dst/python" -m py_compile "$dst/"*.py
-for unit in vpn-portal-peers.service vpn-portal-peers.timer wg-portal-sync.service wg-portal-sync.timer; do
+for unit in vpn-portal-peers.service vpn-portal-peers.timer wg-portal-sync.service wg-portal-sync.timer \
+    vpn-router-inventory.service vpn-router-inventory.timer; do
     install -m 0644 "$root/deploy/cluster/$unit" /etc/systemd/system/
 done
 systemctl daemon-reload
