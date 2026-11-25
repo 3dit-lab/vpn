@@ -346,6 +346,7 @@ TEMPLATES = {
     "base.html": """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/x-icon" href="/apps/favicon.ico">
 <meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">
 <title>{% block title %}Доступ к VPN{% endblock %}</title>
 <style>""" + CSS + """</style></head>
