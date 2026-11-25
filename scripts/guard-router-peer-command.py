@@ -18,11 +18,24 @@ def main():
                 print(sum(1 for line in peers if line.strip()))
             print("active")
         return
-    change = re.fullmatch(r"mt-peer (add|del) ([A-Za-z0-9_.-]{1,32})(?: ([A-Za-z0-9+/]{43}=))?", command)
+    change = re.fullmatch(
+        r"mt-peer (add|del|slot|move) ([A-Za-z0-9_.-]{1,32})(?: (.{1,55}))?", command
+    )
     if change:
-        action, name, key = change.groups()
-        if (action == "add") == bool(key):
-            os.execv(MT_PEER, [MT_PEER, action, name] + ([key] if key else []))
+        action, name, extra = change.groups()
+        arguments = extra.split(" ") if extra else []
+        slot = r"[1-9][0-9]{0,2}"
+        patterns = {
+            "add": (r"[A-Za-z0-9+/]{43}=", slot),
+            "del": (),
+            "slot": (),
+            "move": (slot, slot),
+        }
+        expected = patterns[action]
+        if len(arguments) == len(expected) and all(
+            re.fullmatch(pattern, argument) for pattern, argument in zip(expected, arguments)
+        ):
+            os.execv(MT_PEER, [MT_PEER, action, name, *arguments])
     raise SystemExit("VPN peer command denied")
 
 
