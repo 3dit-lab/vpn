@@ -57,5 +57,6 @@ done
 
 script_dir="$(dirname -- "${BASH_SOURCE[0]}")"
 "$script_dir/fetch-wireguard-windows.sh" "$APPS_DIR"
+install -m 0644 "$script_dir/favicon.ico" "$APPS_DIR/favicon.ico"
 python3 "$script_dir/render-apps.py" "$APPS_DIR" $REPOS
 echo "Готово: $APPS_DIR"
