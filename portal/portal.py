@@ -44,7 +44,7 @@ from contextlib import nullcontext
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, WatchedFileHandler
 from pathlib import Path
 from urllib.parse import quote
 
@@ -152,6 +152,14 @@ try:
     auth_log.addHandler(_h)
 except OSError:
     log.warning("Не удалось открыть %s/auth.log: fail2ban не увидит неудачные входы", _log_dir)
+
+admin_login_log = logging.getLogger("portal.admin_login")
+admin_login_log.handlers.clear()
+admin_login_log.propagate = False
+try:
+    admin_login_log.addHandler(WatchedFileHandler(Path(_log_dir) / "admin-login.jsonl", encoding="utf-8"))
+except OSError:
+    log.warning("Не удалось открыть журнал входов администраторов портала")
 
 # --------------------------------------------------------------------------- шаблоны
 
@@ -1298,6 +1306,16 @@ def auth_fail(kind):
     g.vpn_auth_failed = True
 
 
+def audit_admin_login(role, org=None):
+    ip = client_ip()
+    actor = f"admin {org['slug']}" if org else "super"
+    audit(actor, "вход", f"IP {ip}", org["id"] if org else None)
+    event = {"event": "vpn_portal_admin_login", "role": role, "srcip": ip, "ts": now()}
+    if org:
+        event["organization"] = org["slug"]
+    admin_login_log.info(json.dumps(event, ensure_ascii=False))
+
+
 FONT_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
@@ -1828,7 +1846,7 @@ def org_login():
         flash("Неверный логин или пароль.", "err")
         return redirect("/org/login")
     start_admin_session("org", admin_org=org["id"])
-    audit(f"admin {org['slug']}", "вход", f"IP {client_ip()}", org["id"])
+    audit_admin_login("org", org)
     return redirect("/org")
 
 
@@ -1936,7 +1954,7 @@ def super_login():
         flash("Неверный пароль.", "err")
         return redirect("/super/login")
     start_admin_session("super")
-    audit("super", "вход", f"ip {client_ip()}")
+    audit_admin_login("super")
     return redirect("/super")
 
 
