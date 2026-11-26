@@ -19,17 +19,23 @@ def main():
             print("active")
         return
     change = re.fullmatch(
-        r"mt-peer (add|del|slot|move) ([A-Za-z0-9_.-]{1,32})(?: (.{1,55}))?", command
+        r"mt-peer (add|del|slot|move|initiate|persist-initiator|clear-initiator) "
+        r"([A-Za-z0-9_.-]{1,32})(?: (.{1,70}))?", command
     )
     if change:
         action, name, extra = change.groups()
         arguments = extra.split(" ") if extra else []
         slot = r"[1-9][0-9]{0,2}"
+        key = r"[A-Za-z0-9+/]{43}="
+        endpoint = (key, r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", r"[1-9][0-9]{0,4}")
         patterns = {
-            "add": (r"[A-Za-z0-9+/]{43}=", slot),
+            "add": (key, slot),
             "del": (),
             "slot": (),
             "move": (slot, slot),
+            "initiate": endpoint,
+            "persist-initiator": endpoint,
+            "clear-initiator": (key,),
         }
         expected = patterns[action]
         if len(arguments) == len(expected) and all(
