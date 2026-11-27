@@ -173,7 +173,7 @@ def main():
         logins = p.audit_rows(x.org("alfa")["id"])
         check("audit: успешный вход сотрудника с замаскированным телефоном",
               [(e["actor"], e["details"]) for e in logins if e["action"] == "вход"]
-              == [("user +7900***33", "alfa · IP 10.0.0.1 · первый вход")])
+              == [("user +7900***33", "Клиент · Иванов Иван · IP 10.0.0.1 · первый вход")])
         check("audit: вход сотрудника виден общему администратору",
               any(e["actor"] == "user +7900***33" and e["action"] == "вход" for e in p.audit_rows()))
     x.claim(e1)

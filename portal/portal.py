@@ -1326,13 +1326,34 @@ def audit(actor, action, details="", org_id=None):
 
 
 def audit_rows(org_id=None, limit=30):
-    q, args = "SELECT ts, actor, action, details FROM audit", []
+    q, args = "SELECT ts, actor, action, details, org_id FROM audit", []
     if org_id is not None:
         q += " WHERE org_id=?"
         args.append(org_id)
     q += " ORDER BY id DESC LIMIT ?"
     args.append(limit)
-    return [{"at": fmt(r["ts"]), "actor": r["actor"], "action": r["action"], "details": r["details"]} for r in db().execute(q, args)]
+    c = db()
+    rows = c.execute(q, args).fetchall()
+    result = []
+    legacy = []
+    for row in rows:
+        entry = {"at": fmt(row["ts"]), "actor": row["actor"], "action": row["action"], "details": row["details"]}
+        result.append(entry)
+        actor = re.fullmatch(r"user (\+7\d{3}\*{3}\d{2})", row["actor"])
+        details = re.fullmatch(r"[A-Za-z0-9-]+ · (IP .+)", row["details"])
+        if row["action"] == "вход" and actor and details:
+            legacy.append((entry, row["org_id"], actor[1], row["ts"], details[1]))
+    org_ids = sorted({org for _, org, _, _, _ in legacy if org is not None})
+    profiles = {}
+    if org_ids:
+        placeholders = ",".join("?" for _ in org_ids)
+        for person in c.execute(f"SELECT org_id, phone, name, created_at FROM people WHERE org_id IN ({placeholders})", org_ids):
+            profiles.setdefault((person["org_id"], mask_phone(person["phone"])), []).append(person)
+    for entry, org, phone, ts, details in legacy:
+        matches = [p for p in profiles.get((org, phone), []) if p["created_at"] <= ts]
+        name = matches[0]["name"] if len(matches) == 1 else ""
+        entry["details"] = f"Клиент · {name} · {details}" if name else details
+    return result
 
 
 def record_attempt(kind):
@@ -1568,7 +1589,8 @@ def login():
         return redirect(landing)
     name = clean_text(request.form.get("name"), 80)
     person = c.execute("SELECT * FROM people WHERE org_id=? AND phone=?", (org["id"], phone)).fetchone()
-    if not person:
+    first_login = person is None
+    if first_login:
         if len(name) < 2:
             flash("При первом входе укажите фамилию и имя.", "err")
             return redirect(landing)
@@ -1576,13 +1598,19 @@ def login():
         if SHARED_DSN:
             insert += " ON CONFLICT (org_id, phone) DO NOTHING"
         c.execute(insert, (org["id"], phone, name, now()))
+        person = c.execute("SELECT name FROM people WHERE org_id=? AND phone=?", (org["id"], phone)).fetchone()
+        name = person["name"]
         log.info("login: новый человек %s (%s)", mask_phone(phone), org["slug"])
     else:
         if not person["name"] and name:
             c.execute("UPDATE people SET name=? WHERE id=?", (name, person["id"]))
+        else:
+            name = person["name"]
         log.info("login: вход %s (%s)", mask_phone(phone), org["slug"])
-    details = f"{org['slug']} · IP {client_ip()}"
-    if not person:
+    details = f"IP {client_ip()}"
+    if name:
+        details = f"Клиент · {name} · {details}"
+    if first_login:
         details += " · первый вход"
     if from_guard:
         details += " · из Guard"
