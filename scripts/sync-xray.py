@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Конфиг Xray (VLESS+Reality) из peers.json портала (запуск от root службой vpn-xray-sync раз в минуту).
 
-Клиенты = включённые слоты из peers.json; UUID слота выводится из соли в /etc/vpn-xray.json (uuid5), поэтому на всех
-серверах он одинаков, а выдать ссылку может любой. Xray перезапускается только когда набор клиентов или параметры
+Клиенты = включённые слоты из peers.json. UUID зависит от соли в /etc/vpn-xray.json и текущего ключа устройства.
+При перевыдаче слота меняется и UUID. Xray перезапускается только когда набор клиентов или параметры
 изменились. Если peers.json или /etc/vpn-xray.json нет/некорректны, ничего не меняется.
 """
 import json
+import grp
 import os
 import subprocess
 import sys
@@ -19,12 +20,15 @@ OUT = Path(os.environ.get("XRAY_CONFIG", "/usr/local/etc/xray/config.json"))
 API_PORT = 10085
 
 
-def slot_uuid(salt, slot):
-    return str(uuid.uuid5(uuid.UUID(salt), f"slot{slot:03d}"))
+def slot_uuid(salt, slot, public):
+    return str(uuid.uuid5(uuid.UUID(salt), f"slot{slot:03d}:{public}"))
 
 
-def build(state, slots):
-    clients = [{"id": slot_uuid(state["salt"], s), "flow": "xtls-rprx-vision", "email": f"client{s:03d}"} for s in sorted(slots)]
+def build(state, peers):
+    clients = [
+        {"id": slot_uuid(state["salt"], slot, public), "flow": "xtls-rprx-vision", "email": f"client{slot:03d}"}
+        for slot, public in sorted(peers.items())
+    ]
     return {
         "log": {"loglevel": "warning"},
         "stats": {},
@@ -41,7 +45,7 @@ def build(state, slots):
              "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]}},
         ],
         "outbounds": [{"tag": "direct", "protocol": "freedom"}, {"tag": "block", "protocol": "blackhole"}],
-        "routing": {"rules": [
+        "routing": {"domainStrategy": "IPOnDemand", "rules": [
             {"type": "field", "inboundTag": ["api"], "outboundTag": "api"},
             {"type": "field", "ip": ["geoip:private"], "outboundTag": "block"},
         ]},
@@ -58,23 +62,40 @@ def main():
         data = json.loads(PEERS.read_text())
         if data.get("version") != 1 or not isinstance(data.get("peers"), list):
             raise ValueError("peers.json")
-        slots = {int(p["slot"]) for p in data["peers"]}
+        peers = {int(p["slot"]): p["public"] for p in data["peers"]}
     except (OSError, ValueError, KeyError, TypeError) as e:
         print(f"vpn-xray-sync: нет данных ({e}), без изменений", file=sys.stderr)
         return 0
-    text = json.dumps(build(state, slots), indent=1, ensure_ascii=False) + "\n"
+    text = json.dumps(build(state, peers), indent=1, ensure_ascii=False) + "\n"
     if OUT.exists() and OUT.read_text() == text:
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=OUT.parent, prefix=".config.")
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.chmod(tmp, 0o640)
-    os.replace(tmp, OUT)
-    if os.environ.get("XRAY_NO_RESTART"):
-        return 0
-    subprocess.run(["systemctl", "restart", "xray"], check=False)
-    print(f"vpn-xray-sync: применено клиентов: {len(slots)}", flush=True)
+    dry_restart = bool(os.environ.get("XRAY_NO_RESTART"))
+    fd, name = tempfile.mkstemp(dir=OUT.parent, prefix=".config.", suffix=".json")
+    tmp = Path(name)
+    previous = tmp.with_suffix(".previous")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            os.fchmod(f.fileno(), 0o640)
+            if not dry_restart:
+                os.fchown(f.fileno(), -1, grp.getgrnam("xray").gr_gid)
+        if not dry_restart:
+            subprocess.run(["/usr/local/bin/xray", "run", "-test", "-c", str(tmp)], check=True)
+        if OUT.exists():
+            os.link(OUT, previous)
+        os.replace(tmp, OUT)
+        if not dry_restart and subprocess.run(["systemctl", "restart", "xray"]).returncode:
+            if previous.exists():
+                os.replace(previous, OUT)
+                subprocess.run(["systemctl", "restart", "xray"], check=True)
+            else:
+                OUT.unlink()
+            return 1
+    finally:
+        tmp.unlink(missing_ok=True)
+        previous.unlink(missing_ok=True)
+    print(f"vpn-xray-sync: применено клиентов: {len(peers)}", flush=True)
     return 0
 
 

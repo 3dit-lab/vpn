@@ -91,7 +91,8 @@ if WG_SERVERS or os.environ.get("PORTAL_WG_ENDPOINT"):
     else:
         WG_GATEWAYS["default"] = Gateway(os.environ["PORTAL_WG_ENDPOINT"], key, dns)
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
-XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1"  # кнопка «Ссылка для Happ»: пока выключена, включается PORTAL_XRAY_UI=1
+HAPP_HOST = os.environ.get("PORTAL_HAPP_HOST", "")
+XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1" and bool(re.fullmatch(r"[A-Za-z0-9.-]{1,253}", HAPP_HOST))
 DB_PATH = DATA_DIR / "portal.db"
 SHARED_DSN = os.environ.get("PORTAL_DB_DSN")
 if SHARED_DSN:
@@ -424,7 +425,7 @@ TEMPLATES = {
       <small>Весь трафик через VPN. «Авто» распределяет подключения между доступными серверами.</small>
     </form>
     {% endif %}
-    {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
+    {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless">Ссылка для Happ</button>{% endif %}
     <small class="copystate"></small>
   </div>
   {% else %}
@@ -497,8 +498,6 @@ TEMPLATES = {
       var dev = sel.closest(".dev"), u = "/d/" + sel.getAttribute("data-slot") + "/conf?srv=" + encodeURIComponent(sel.value);
       dev.querySelector("a.dl").setAttribute("href", u);
       dev.querySelector(".copy").setAttribute("data-url", u);
-      var xb = dev.querySelector(".copy[data-what]");
-      if (xb) xb.setAttribute("data-url", "/d/" + sel.getAttribute("data-slot") + "/vless?srv=" + encodeURIComponent(sel.value));
     });
   });
 {% endif %}
@@ -506,8 +505,31 @@ TEMPLATES = {
   for (var i = 0; i < btns.length; i++) {
     btns[i].addEventListener("click", function () {
       var b = this, st = b.parentNode.querySelector(".copystate");
-      function done(ok) { st.textContent = ok ? (b.getAttribute("data-what") || "Конфиг скопирован в буфер обмена.") : "Не удалось скопировать, используйте «Скачать конфиг»."; }
-      fetch(b.getAttribute("data-url"), {credentials: "same-origin"}).then(function (r) { return r.text(); }).then(function (text) {
+      var url = b.getAttribute("data-url"), happ = b.hasAttribute("data-what");
+      function done(ok) {
+        st.textContent = ok ? (b.getAttribute("data-what") || "Конфиг скопирован в буфер обмена.") : "Не удалось скопировать.";
+        if (!ok && happ) {
+          var link = document.createElement("a");
+          link.href = url; link.textContent = "Открыть ссылку для ручного копирования";
+          st.append(" ", link);
+        }
+      }
+      function read() {
+        return fetch(url, {credentials: "same-origin"}).then(function (r) {
+          if (!r.ok) throw new Error("Download failed");
+          return r.text();
+        }).then(function (text) {
+          if (happ && !text.startsWith("vless://")) throw new Error("Invalid Happ link");
+          return happ ? text.trim() : text;
+        });
+      }
+      if (happ && navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+        navigator.clipboard.write([new ClipboardItem({"text/plain": read().then(function (text) {
+          return new Blob([text], {type: "text/plain"});
+        })})]).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+      read().then(function (text) {
         if (navigator.clipboard && window.isSecureContext) {
           navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
         } else {
@@ -1697,16 +1719,24 @@ def download_vless(slot):
     st = xray_state() if XRAY_UI else None
     if not st:
         return Response("Не настроено", status=404, mimetype="text/plain")
-    row = db().execute("SELECT person_id FROM assignments WHERE slot=?", (slot,)).fetchone()
-    if not row or row["person_id"] != person["id"]:
+    c = db()
+    if SHARED_DSN:
+        row = c.execute(
+            "SELECT cfg.body FROM assignments a JOIN portal_configs cfg ON cfg.slot=a.slot "
+            "WHERE a.slot=? AND a.person_id=?", (slot, person["id"])
+        ).fetchone()
+        info = peer_info(slot, c, row[0]) if row else None
+    else:
+        row = c.execute("SELECT 1 FROM assignments WHERE slot=? AND person_id=?", (slot, person["id"])).fetchone()
+        info = peer_info(slot, c) if row else None
+    if not info:
         return Response("Не найдено", status=404, mimetype="text/plain")
-    chosen = next((x for x in SERVERS if x["key"] == request.args.get("srv")), None) or (SERVERS[0] if SERVERS else None)
-    host = chosen["host"] if chosen else request.host.split(":")[0]
-    title = f"3dit-vpn-{slot:03d}" + (f" {chosen['title']}" if chosen else "")
-    link = (f"vless://{uuid.uuid5(uuid.UUID(st['salt']), f'slot{slot:03d}')}@{host}:{int(st['port'])}"
+    credential = uuid.uuid5(uuid.UUID(st["salt"]), f"slot{slot:03d}:{info['public']}")
+    title = f"3dit Happ {slot:03d} · {HAPP_HOST}"
+    link = (f"vless://{credential}@{HAPP_HOST}:{int(st['port'])}"
             f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={st['sni']}&fp={st.get('fp') or 'ios'}"
             f"&pbk={st['public']}&sid={st['short_id']}&type=tcp#{quote(title)}")
-    return Response(link + "\n", mimetype="text/plain")
+    return Response(link + "\n", mimetype="text/plain", headers={"Cache-Control": "no-store"})
 
 
 @app.route("/captcha/<cid>.png")

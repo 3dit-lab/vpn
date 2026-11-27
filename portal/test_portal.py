@@ -511,6 +511,7 @@ def main():
                                "port": 8443, "salt": SALT}))
     os.environ["XRAY_STATE"] = str(xst)
     os.environ["PORTAL_XRAY_UI"] = "1"
+    os.environ["PORTAL_HAPP_HOST"] = "fi-1-vpn.3dit.ru"
     p6, d6 = load(slots=3)
     x6 = Ctx(p6)
     sc6 = x6.client()
@@ -549,20 +550,28 @@ def main():
     os.environ.pop("PORTAL_WG_PUBLIC_KEY")
     # ---------- Xray (VLESS+Reality): ссылка для Happ, учёт трафика, генерация конфига
     import uuid as _uuid
-    link = e6.get(f"/d/{slot6}/vless?srv=kz").get_data(as_text=True).strip()
-    want = str(_uuid.uuid5(_uuid.UUID(SALT), f"slot{slot6:03d}"))
-    check("xray: ссылка vless", link.startswith(f"vless://{want}@kz-1-vpn.3dit.ru:8443?")
-          and "security=reality" in link and "pbk=PUBKEY" in link and "sid=ab12cd34" in link and "flow=xtls-rprx-vision" in link and "fp=ios" in link, link)
+    response = e6.get(f"/d/{slot6}/vless?srv=kz")
+    link = response.get_data(as_text=True).strip()
+    with p6.app.app_context():
+        public = p6.peer_info(slot6)["public"]
+    want = str(_uuid.uuid5(_uuid.UUID(SALT), f"slot{slot6:03d}:{public}"))
+    check("xray: ссылка vless", link.startswith(f"vless://{want}@fi-1-vpn.3dit.ru:8443?")
+          and "security=reality" in link and "pbk=PUBKEY" in link and "sid=ab12cd34" in link
+          and "flow=xtls-rprx-vision" in link and "fp=ios" in link and response.headers["Cache-Control"] == "no-store")
     check("xray: ссылка чужому слоту недоступна", sc6.get(f"/d/{slot6}/vless").status_code == 403
           and e6.get("/d/99/vless").status_code == 404)
     check("xray: кнопка на странице", "Ссылка для Happ" in e6.get("/").get_data(as_text=True))
     (d6 / "traffic-xray-local.json").write_text(json.dumps({"version": 1, "peers": {f"xray:{slot6:03d}": {"rx": 7, "tx": 9}}}))
     with p6.app.app_context():
         check("xray: трафик слота прибавляется", p6.slot_traffic(slot6)[0] >= 7)
+        p6.rotate_slot(slot6)
+    check("xray: после перевыдачи старая ссылка меняется",
+          e6.get(f"/d/{slot6}/vless").get_data(as_text=True).strip() != link)
     p6.XRAY_STATE = Path("/nonexistent")
     check("xray: без настроек ссылки нет", p6.xray_state() is None)
     os.environ.pop("XRAY_STATE", None)
     os.environ.pop("PORTAL_XRAY_UI", None)
+    os.environ.pop("PORTAL_HAPP_HOST", None)
     os.environ.pop("PORTAL_SERVERS", None)
 
     # ---------- чётность слотов сервера (чёт/нечёт между основным и резервным)
