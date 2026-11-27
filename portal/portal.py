@@ -203,9 +203,9 @@ input[type=text], input[type=tel], input[type=password], input[type=number] { wi
 .dev { border-top:1px solid var(--line); padding:12px 0; }
 .dev:first-of-type { border-top:0; }
 small, .muted { color:var(--muted); }
-.app { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:8px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
-.app:first-of-type { border-top:0; }
-.app.me { font-weight:600; }
+.portal-links { display:flex; flex-wrap:wrap; column-gap:16px; }
+.guide ol { padding-left:1.45rem; }
+.guide li + li { margin-top:.4rem; }
 table { border-collapse:collapse; width:100%; font-size:14px; }
 th, td { border-bottom:1px solid var(--line); padding:8px 6px; text-align:left; vertical-align:top; }
 th { color:var(--muted); font-weight:600; white-space:nowrap; }
@@ -375,7 +375,7 @@ TEMPLATES = {
 <header class="portal-head">
   <p>ООО «Тридит»</p>
   <h1>{{ "VPN для устройства из Guard" if from_guard else "Доступ к VPN" }}</h1>
-  <a href="/apps/">Приложения для VPN</a>
+  <nav class="portal-links" aria-label="Подключение"><a href="/apps/">Приложения для VPN</a><a href="/help">Как подключиться</a></nav>
 </header>
 <div class="card">
   {% if from_guard %}<p>Введите номер телефона и код организации. После входа конфиг сохранится в вашем профиле, когда вы нажмёте «Получить конфиг».</p>{% endif %}
@@ -400,10 +400,10 @@ TEMPLATES = {
 <header class="portal-head">
   <h1>Доступ к VPN</h1>
   <p>{{ org_name }} · {{ name }} · {{ phone }}</p>
-  <a href="/apps/">Приложения для VPN</a>
+  <nav class="portal-links" aria-label="Подключение"><a href="/apps/">Приложения для VPN</a><a href="/help">Как подключиться</a></nav>
 </header>
 
-<div class="warn">Конфиг личный: не пересылайте его другим людям. Один конфиг работает только на одном устройстве. Для каждого следующего устройства получите отдельный конфиг ниже.</div>
+<div class="warn">Конфиг и ссылка Happ дают доступ к VPN. Храните их у себя и получайте отдельный конфиг для каждого устройства.</div>
 
 <div class="card">
   <h2>Мои конфиги</h2>
@@ -411,7 +411,7 @@ TEMPLATES = {
   <div class="dev" id="config-{{ d.slot }}">
     <b>Устройство {{ loop.index }}</b>{% if d.label %} · {{ d.label }}{% endif %}<br>
     <small>Конфиг №{{ '%03d' % d.slot }} · выдан {{ d.at }}</small>
-    {% if servers %}<br><label>Сервер
+    {% if servers %}<br><label>Сервер Amnezia VPN
       <select class="srv" data-slot="{{ d.slot }}">{% for sv in servers %}<option value="{{ sv.key }}">{{ sv.title }}</option>{% endfor %}</select></label>
     <small>«Авто»: подключение к доступному серверу. Региональный вариант выбирайте, если нужен конкретный сервер. Вариант «весь трафик» пускает через VPN весь интернет устройства, без разделения.</small><br>{% endif %}
     <a class="btn primary dl" href="/d/{{ d.slot }}/conf{% if servers %}?srv={{ servers[0].key }}{% endif %}">Скачать конфиг</a>
@@ -460,40 +460,10 @@ TEMPLATES = {
   <p><small>Переустановили приложение или сменили телефон? Новый конфиг не нужен: скачайте свой прежний конфиг заново.</small></p>
 </div>
 
-<div class="card">
-  <h2>Приложения</h2>
-  <div class="app" data-os="ios"><span>iPhone / iPad</span><span><a href="https://apps.apple.com/app/id6744725017" rel="noopener">DefaultVPN (App Store)</a></span></div>
-  <div class="app" data-os="android"><span>Android</span><span><a href="https://play.google.com/store/apps/details?id=org.amnezia.vpn" rel="noopener">Google Play</a> · <a href="/apps/">файл .apk</a></span></div>
-  <div class="app" data-os="windows"><span>Windows</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
-  <div class="app" data-os="mac"><span>macOS</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
-  <div class="app" data-os="linux"><span>Linux</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
-  <p><small>На iPhone Amnezia VPN в российском App Store недоступен, поэтому используется DefaultVPN. На остальных системах ставится Amnezia VPN.</small></p>
-  <p>Для файла WireGuard (.conf) <a href="/apps/#wireguard">скачайте WireGuard</a>.</p>
-  {% if xray %}<p><small>{% if happ_subscribe %}Скопируйте «Подписку Happ» и добавьте её из буфера обмена. Список серверов загрузится сразу.{% else %}Нажмите «Ссылка для Happ» и добавьте её из буфера обмена в приложении.{% endif %} Установщики — на странице <a href="/apps/">приложений</a>.</small></p>{% endif %}
-</div>
-
-<div class="card">
-  <h2>Как подключить</h2>
-  <ol>
-    <li>Установите приложение для своей системы (список выше).</li>
-    <li>Нажмите «Скачать конфиг» и откройте файл в приложении: на телефоне через «Поделиться» / «Открыть в…», на компьютере через добавление подключения из файла.</li>
-    <li>Включите подключение. Заблокированные сервисы (мессенджеры, нейросети) заработают, банки и госуслуги останутся без VPN.</li>
-  </ol>
-  <p><small>Не получается? Напишите в поддержку: it@3dit.ru</small></p>
-</div>
-
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Выйти</button></form>
 
 <script>
 (function () {
-  var ua = navigator.userAgent || "", p = navigator.platform || "", id = "";
-  if (/iPhone|iPad|iPod/.test(ua) || (p === "MacIntel" && navigator.maxTouchPoints > 1)) id = "ios";
-  else if (/Android/.test(ua)) id = "android";
-  else if (/Windows/.test(ua)) id = "windows";
-  else if (/Mac/.test(ua)) id = "mac";
-  else if (/Linux|X11/.test(ua)) id = "linux";
-  var me = document.querySelector('[data-os="' + id + '"]');
-  if (me) me.className += " me";
 {% if servers %}
   document.querySelectorAll("select.srv").forEach(function (sel) {
     sel.addEventListener("change", function () {
@@ -544,6 +514,63 @@ TEMPLATES = {
   }
 })();
 </script>
+{% endblock %}""",
+
+    "help.html": """{% extends "base.html" %}
+{% block title %}Как подключиться к 3DIT VPN{% endblock %}
+{% block content %}
+<header class="portal-head">
+  <p>3DIT VPN</p>
+  <h1>Как подключиться к VPN</h1>
+  <nav class="portal-links" aria-label="VPN-портал"><a href="/">Личный кабинет</a><a href="/apps/">Приложения для VPN</a></nav>
+</header>
+<div class="guide">
+<section class="card">
+  <h2>Получите конфиг для устройства</h2>
+  <ol>
+    <li>Войдите в <a href="/">личный кабинет</a> по номеру телефона и пятизначному коду организации. Код выдаёт ваш администратор.</li>
+    <li>Откройте «Мои конфиги». Если это первое подключение, нажмите <b>«Получить конфиг»</b>. Для каждого устройства используйте свой конфиг.</li>
+    <li>Выберите инструкцию для своего приложения.</li>
+  </ol>
+  <nav class="portal-links" aria-label="Инструкции"><a href="#amnezia">Amnezia VPN</a><a href="#wireguard">WireGuard</a>{% if xray %}<a href="#happ">Happ</a>{% endif %}</nav>
+</section>
+<section class="card" id="amnezia">
+  <h2>Amnezia VPN</h2>
+  <ol>
+    <li>Установите <a href="/apps/#amnezia">Amnezia VPN</a>. Если приложение недоступно в App Store, для iPhone и iPad с iOS/iPadOS 16 или новее можно использовать DefaultVPN.</li>
+    <li>В личном кабинете выберите сервер Amnezia VPN и нажмите <b>«Скачать конфиг»</b>.</li>
+    <li>В приложении нажмите <b>«+»</b>, выберите импорт файла, укажите скачанный <code>.conf</code> и подключитесь.</li>
+  </ol>
+  <p>Через VPN идут адреса, указанные в конфиге.{% if amnezia_full %} Если нужен весь интернет-трафик через VPN, выберите на портале вариант «весь трафик».{% endif %}</p>
+</section>
+<section class="card" id="wireguard">
+  <h2>WireGuard</h2>
+  <ol>
+    <li>Установите <a href="/apps/#wireguard">WireGuard</a> для своей системы.</li>
+    <li>В личном кабинете выберите сервер WireGuard и нажмите <b>«Скачать WireGuard»</b>. Режим «Авто» распределяет подключения между доступными серверами.</li>
+    <li>Добавьте туннель из скачанного файла <code>.conf</code> и включите его. На Linux с WireGuard Tools можно запустить <code>sudo wg-quick up /путь/к/файлу.conf</code>.</li>
+  </ol>
+  <p>Весь интернет-трафик устройства идёт через VPN, пока туннель включён.</p>
+</section>
+{% if xray %}<section class="card" id="happ">
+  <h2>Happ</h2>
+  <ol>
+    <li>Установите <a href="/apps/#happ">Happ</a> для своей системы.</li>
+    <li>В личном кабинете нажмите <b>{{ '«Подписка Happ»' if happ_subscribe else '«Ссылка для Happ»' }}</b>.</li>
+    <li>В Happ нажмите <b>«+» → «Вставить из буфера обмена»</b>.{% if happ_subscribe %} В группе <b>3DIT VPN</b> появится список серверов. Выберите сервер и подключитесь.{% else %} Выберите добавленный сервер и подключитесь.{% endif %}</li>
+  </ol>
+  {% if happ_subscribe %}<p>Чтобы загрузить актуальный список серверов, нажмите значок обновления рядом с названием группы 3DIT VPN.</p>{% endif %}
+</section>{% endif %}
+<section class="card">
+  <h2>Если VPN не подключается</h2>
+  <ul>
+    <li>Отключите другие VPN-приложения и попробуйте подключиться ещё раз. При запросе системы разрешите приложению добавить VPN-подключение.</li>
+    <li>Попробуйте другой сервер. Для WireGuard и Amnezia VPN скачайте конфиг выбранного сервера. {% if xray and happ_subscribe %}В Happ сервер можно сменить в списке 3DIT VPN.{% endif %}</li>
+    <li>После переустановки приложения можно снова скачать свой конфиг или скопировать ссылку Happ из кабинета.</li>
+  </ul>
+  <p>Напишите в <a href="mailto:it@3dit.ru">it@3dit.ru</a>, если проблема осталась. Укажите приложение, устройство, сервер и текст ошибки. Не прикладывайте конфиг, код организации или личную ссылку Happ.</p>
+</section>
+</div>
 {% endblock %}""",
 
     "admin_login.html": """{% extends "base.html" %}
@@ -1500,6 +1527,12 @@ def index():
                 from_guard=from_guard, guard_phone_verified=session.get("guard_verified_phone") == person["phone"],
                 org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS,
                 wireguard_servers=WG_SERVERS, xray=XRAY_UI and bool(xray_state()), happ_subscribe=HAPP_SUBSCRIBE)
+
+
+@app.route("/help")
+def connection_help():
+    return page("help.html", xray=XRAY_UI and bool(xray_state()), happ_subscribe=HAPP_SUBSCRIBE,
+                amnezia_full=any(server["full"] for server in SERVERS))
 
 
 @app.route("/login", methods=["POST"])

@@ -77,6 +77,18 @@ def mirror_section(directory, title, amnezia):
         ios = card("ios", "iPhone / iPad", "DefaultVPN · App Store",
                    "https://apps.apple.com/app/id6744725017", "Открыть App Store")
         cards.insert(sum(order.get(platform, 5) < 3 for platform, _ in rows), ios)
+        if not any(platform == "linux" for platform, _ in rows):
+            cards.append(card("linux", "Linux", "Amnezia VPN · сайт разработчика",
+                              "https://amnezia.org/downloads", "Открыть загрузки"))
+    if title == "Happ":
+        mobile = [
+            card("android", "Android", "Happ · APK от разработчика",
+                 "https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk", "Скачать APK"),
+            card("ios", "iPhone / iPad", "Happ · доступность зависит от региона App Store",
+                 "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215", "Открыть App Store"),
+        ]
+        mobile_index = sum(order.get(platform, 5) < 4 for platform, _ in rows)
+        cards[mobile_index:mobile_index] = mobile
 
     details = ""
     if older:
@@ -85,8 +97,8 @@ def mirror_section(directory, title, amnezia):
     source = directory / "SOURCE.txt"
     source_text = source.read_text(encoding="utf-8") if source.is_file() else ""
     version = re.search(r"/releases/tag/([^\s]+)", source_text)
-    subtitle = ("Для конфигов Amnezia из личного кабинета." if amnezia
-                else "Для ссылки Happ из личного кабинета." if title == "Happ" else "")
+    subtitle = ('Для файла из кнопки «Скачать конфиг». <a href="/help#amnezia">Как подключить Amnezia VPN</a>' if amnezia
+                else 'Для подписки из личного кабинета. <a href="/help#happ">Как подключить Happ</a>' if title == "Happ" else "")
     section_id = "amnezia" if amnezia else "happ" if title == "Happ" else quote(directory.name)
     version_html = f'<span class="version">{escape(version[1])}</span>' if version else ""
     source_link = f' · <a href="{quote(directory.name)}/SOURCE.txt">Источник файлов</a>' if source.is_file() else ""
