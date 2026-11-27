@@ -512,6 +512,11 @@ def main():
     os.environ["XRAY_STATE"] = str(xst)
     os.environ["PORTAL_XRAY_UI"] = "1"
     os.environ["PORTAL_HAPP_HOST"] = "fi-1-vpn.3dit.ru"
+    os.environ["PORTAL_HAPP_SUBSCRIBE"] = "1"
+    nodes = xst.with_name("happ-nodes.json")
+    nodes.write_text(json.dumps({"fi2": {"host": "fi-2-vpn.3dit.ru"},
+                                 "ee1": {"host": "ee-1.example.com", "public": "EEKEY"}}))
+    os.environ["PORTAL_HAPP_NODES"] = str(nodes)
     p6, d6 = load(slots=3)
     x6 = Ctx(p6)
     sc6 = x6.client()
@@ -560,18 +565,30 @@ def main():
           and "flow=xtls-rprx-vision" in link and "fp=ios" in link and response.headers["Cache-Control"] == "no-store")
     check("xray: ссылка чужому слоту недоступна", sc6.get(f"/d/{slot6}/vless").status_code == 403
           and e6.get("/d/99/vless").status_code == 404)
-    check("xray: кнопка на странице", "Ссылка для Happ" in e6.get("/").get_data(as_text=True))
+    check("xray: кнопка подписки на странице", "Подписка Happ" in e6.get("/").get_data(as_text=True))
+    subscription_link = e6.get(f"/d/{slot6}/vless/subscription").get_data(as_text=True).strip()
+    subscription_path = subscription_link.removeprefix("https://vpn.3dit.ru")
+    subscription = x6.client().get(subscription_path)
+    lines = subscription.get_data(as_text=True).splitlines()
+    check("xray: подписка содержит три сервера и фирменное название",
+          subscription.status_code == 200 and lines[0] == "#profile-title: 🛡️ 3DIT VPN"
+          and sum(line.startswith("vless://") for line in lines) == 3 and "pbk=EEKEY" in lines[-1])
+    check("xray: подписка требует правильный токен",
+          x6.client().get(subscription_path.rsplit("/", 1)[0] + "/" + "0" * 64).status_code == 404)
     (d6 / "traffic-xray-local.json").write_text(json.dumps({"version": 1, "peers": {f"xray:{slot6:03d}": {"rx": 7, "tx": 9}}}))
     with p6.app.app_context():
         check("xray: трафик слота прибавляется", p6.slot_traffic(slot6)[0] >= 7)
         p6.rotate_slot(slot6)
     check("xray: после перевыдачи старая ссылка меняется",
           e6.get(f"/d/{slot6}/vless").get_data(as_text=True).strip() != link)
+    check("xray: после перевыдачи старая подписка недоступна", x6.client().get(subscription_path).status_code == 404)
     p6.XRAY_STATE = Path("/nonexistent")
     check("xray: без настроек ссылки нет", p6.xray_state() is None)
     os.environ.pop("XRAY_STATE", None)
     os.environ.pop("PORTAL_XRAY_UI", None)
     os.environ.pop("PORTAL_HAPP_HOST", None)
+    os.environ.pop("PORTAL_HAPP_SUBSCRIBE", None)
+    os.environ.pop("PORTAL_HAPP_NODES", None)
     os.environ.pop("PORTAL_SERVERS", None)
 
     # ---------- чётность слотов сервера (чёт/нечёт между основным и резервным)

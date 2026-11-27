@@ -93,6 +93,8 @@ if WG_SERVERS or os.environ.get("PORTAL_WG_ENDPOINT"):
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
 HAPP_HOST = os.environ.get("PORTAL_HAPP_HOST", "")
 XRAY_UI = os.environ.get("PORTAL_XRAY_UI") == "1" and bool(re.fullmatch(r"[A-Za-z0-9.-]{1,253}", HAPP_HOST))
+HAPP_SUBSCRIBE = os.environ.get("PORTAL_HAPP_SUBSCRIBE") == "1"
+HAPP_NODES = Path(os.environ.get("PORTAL_HAPP_NODES", "/etc/vpn-happ-nodes.json"))
 DB_PATH = DATA_DIR / "portal.db"
 SHARED_DSN = os.environ.get("PORTAL_DB_DSN")
 if SHARED_DSN:
@@ -425,7 +427,7 @@ TEMPLATES = {
       <small>Весь трафик через VPN. «Авто» распределяет подключения между доступными серверами.</small>
     </form>
     {% endif %}
-    {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless">Ссылка для Happ</button>{% endif %}
+    {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-prefix="{{ 'https://vpn.3dit.ru/happ-sub/' if happ_subscribe else 'vless://' }}" data-url="/d/{{ d.slot }}/vless{{ '/subscription' if happ_subscribe else '' }}">{{ 'Подписка Happ' if happ_subscribe else 'Ссылка для Happ' }}</button>{% endif %}
     <small class="copystate"></small>
   </div>
   {% else %}
@@ -467,7 +469,7 @@ TEMPLATES = {
   <div class="app" data-os="linux"><span>Linux</span><span><a href="/apps/">Скачать</a> · <a href="https://amnezia.org/en/downloads" rel="noopener">сайт разработчика</a></span></div>
   <p><small>На iPhone Amnezia VPN в российском App Store недоступен, поэтому используется DefaultVPN. На остальных системах ставится Amnezia VPN.</small></p>
   <p>Для файла WireGuard (.conf) <a href="/apps/#wireguard">скачайте WireGuard</a>.</p>
-  {% if xray %}<p><small>Если VPN не подключается (например, в мобильной сети), используйте приложение <b>Happ</b>: нажмите «Ссылка для Happ», в Happ добавьте её из буфера обмена. Файлы Happ для Windows, macOS и Linux — на странице <a href="/apps/">приложений</a>, для телефонов — в App Store / Google Play.</small></p>{% endif %}
+  {% if xray %}<p><small>{% if happ_subscribe %}Скопируйте «Подписку Happ» и добавьте её из буфера обмена. Список серверов загрузится сразу.{% else %}Нажмите «Ссылка для Happ» и добавьте её из буфера обмена в приложении.{% endif %} Установщики — на странице <a href="/apps/">приложений</a>.</small></p>{% endif %}
 </div>
 
 <div class="card">
@@ -519,7 +521,7 @@ TEMPLATES = {
           if (!r.ok) throw new Error("Download failed");
           return r.text();
         }).then(function (text) {
-          if (happ && !text.startsWith("vless://")) throw new Error("Invalid Happ link");
+          if (happ && !text.startsWith(b.getAttribute("data-prefix"))) throw new Error("Invalid Happ link");
           return happ ? text.trim() : text;
         });
       }
@@ -1497,7 +1499,7 @@ def index():
     return page("dashboard.html", name=person["name"] or "Без имени", phone=phone_display(person["phone"]),
                 from_guard=from_guard, guard_phone_verified=session.get("guard_verified_phone") == person["phone"],
                 org_name=person["org_name"], devices=devices, dev_limit=person["dev_limit"], servers=SERVERS,
-                wireguard_servers=WG_SERVERS, xray=XRAY_UI and bool(xray_state()))
+                wireguard_servers=WG_SERVERS, xray=XRAY_UI and bool(xray_state()), happ_subscribe=HAPP_SUBSCRIBE)
 
 
 @app.route("/login", methods=["POST"])
@@ -1711,32 +1713,79 @@ def xray_state():
         return None
 
 
-@app.route("/d/<int:slot>/vless")
-def download_vless(slot):
+def happ_peer(slot, person_id=None):
+    c = db()
+    columns = "cfg.body" if SHARED_DSN else "1"
+    configs = "JOIN portal_configs cfg ON cfg.slot=a.slot" if SHARED_DSN else ""
+    owner = " AND a.person_id=?" if person_id is not None else ""
+    row = c.execute(
+        f"SELECT {columns} FROM assignments a {configs} "
+        "JOIN people p ON p.id=a.person_id JOIN orgs o ON o.id=p.org_id "
+        f"WHERE a.slot=? AND o.enabled=1{owner}",
+        (slot, person_id) if owner else (slot,)
+    ).fetchone()
+    return peer_info(slot, c, row[0] if SHARED_DSN else None) if row else None
+
+
+def happ_text(text, status=200):
+    return Response(text + "\n", status=status, mimetype="text/plain",
+                    headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+def happ_token(state, slot, public):
+    return hmac.new(uuid.UUID(state["salt"]).bytes, f"happ-sub:{slot}:{public}".encode(), hashlib.sha256).hexdigest()
+
+
+def happ_vless(credential, host, title, state):
+    return (f"vless://{credential}@{host}:{int(state['port'])}"
+            f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={state['sni']}&fp={state.get('fp') or 'ios'}"
+            f"&pbk={state['public']}&sid={state['short_id']}&type=tcp#{quote(title)}")
+
+
+@app.route("/d/<int:slot>/vless", defaults={"subscription": False})
+@app.route("/d/<int:slot>/vless/subscription", defaults={"subscription": True})
+def download_vless(slot, subscription):
     person = current_person()
     if not person or not person["org_enabled"]:
-        return Response("Требуется вход", status=403, mimetype="text/plain")
-    st = xray_state() if XRAY_UI else None
-    if not st:
-        return Response("Не настроено", status=404, mimetype="text/plain")
-    c = db()
-    if SHARED_DSN:
-        row = c.execute(
-            "SELECT cfg.body FROM assignments a JOIN portal_configs cfg ON cfg.slot=a.slot "
-            "WHERE a.slot=? AND a.person_id=?", (slot, person["id"])
-        ).fetchone()
-        info = peer_info(slot, c, row[0]) if row else None
-    else:
-        row = c.execute("SELECT 1 FROM assignments WHERE slot=? AND person_id=?", (slot, person["id"])).fetchone()
-        info = peer_info(slot, c) if row else None
+        return happ_text("Требуется вход", 403)
+    state = xray_state() if XRAY_UI else None
+    if not state or (subscription and not HAPP_SUBSCRIBE):
+        return happ_text("Не настроено", 404)
+    info = happ_peer(slot, person["id"])
     if not info:
-        return Response("Не найдено", status=404, mimetype="text/plain")
-    credential = uuid.uuid5(uuid.UUID(st["salt"]), f"slot{slot:03d}:{info['public']}")
-    title = f"3dit Happ {slot:03d} · {HAPP_HOST}"
-    link = (f"vless://{credential}@{HAPP_HOST}:{int(st['port'])}"
-            f"?encryption=none&flow=xtls-rprx-vision&security=reality&sni={st['sni']}&fp={st.get('fp') or 'ios'}"
-            f"&pbk={st['public']}&sid={st['short_id']}&type=tcp#{quote(title)}")
-    return Response(link + "\n", mimetype="text/plain", headers={"Cache-Control": "no-store"})
+        return happ_text("Не найдено", 404)
+    if subscription:
+        token = happ_token(state, slot, info["public"])
+        return happ_text(f"https://vpn.3dit.ru/happ-sub/{slot}/{token}")
+    credential = uuid.uuid5(uuid.UUID(state["salt"]), f"slot{slot:03d}:{info['public']}")
+    return happ_text(happ_vless(credential, HAPP_HOST, "🇫🇮 Финляндия 1", state))
+
+
+@app.route("/happ-sub/<int:slot>/<token>")
+def happ_subscription(slot, token):
+    state = xray_state() if XRAY_UI and HAPP_SUBSCRIBE else None
+    info = happ_peer(slot) if state and 0 < slot < 100000 and re.fullmatch(r"[0-9a-f]{64}", token) else None
+    if not info or not hmac.compare_digest(token, happ_token(state, slot, info["public"])):
+        return happ_text("Не найдено", 404)
+    credential = uuid.uuid5(uuid.UUID(state["salt"]), f"slot{slot:03d}:{info['public']}")
+    lines = ["#profile-title: 🛡️ 3DIT VPN", "#profile-update-interval: 1",
+             "#announce: 🌐 Выберите сервер в списке. Подписка обновляет список автоматически.",
+             happ_vless(credential, HAPP_HOST, "🇫🇮 Финляндия 1", state)]
+    try:
+        extra = json.loads(HAPP_NODES.read_text())
+    except (OSError, ValueError):
+        extra = {}
+    for key, title in (("fi2", "🇫🇮 Финляндия 2"), ("ee1", "🇪🇪 Эстония")):
+        node = extra.get(key) if isinstance(extra, dict) else None
+        if not isinstance(node, dict):
+            continue
+        host = node.get("host", "")
+        if isinstance(host, str) and re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
+            try:
+                lines.append(happ_vless(credential, host, title, {**state, **node}))
+            except (TypeError, ValueError):
+                log.error("Happ: invalid port for %s", key)
+    return happ_text("\n".join(lines))
 
 
 @app.route("/captcha/<cid>.png")
