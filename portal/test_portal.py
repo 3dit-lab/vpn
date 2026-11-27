@@ -499,6 +499,12 @@ def main():
     check("servers: разбор PORTAL_SERVERS",
           [x["key"] for x in p5.parse_servers("auto|vpn.x.ru|Авто;kz|kz-1.x.ru|Казахстан-1;bad|в ну|x")] == ["auto", "kz"])
     os.environ["PORTAL_SERVERS"] = "auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;kz|kz-1-vpn.3dit.ru|Казахстан-1;all|vpn.3dit.ru|Авто, весь трафик|full"
+    os.environ["PORTAL_WG_SERVERS"] = (
+        "fi1|fi-1-vpn.3dit.ru|Финляндия-1;auto|wg.vpn.3dit.ru|Авто;"
+        "fi2|fi-2-vpn.3dit.ru|Финляндия-2;ee1|ee-1-vpn.3dit.ru|Эстония;"
+        "all|wg.vpn.3dit.ru|Авто, весь трафик IPv4|full"
+    )
+    os.environ["PORTAL_WG_PUBLIC_KEY"] = b64key(201)
     xst = Path(tempfile.mkdtemp()) / "vpn-xray.json"
     SALT = "6f1c5a52-3f0e-4b53-9a8e-0d9f6b7a1c11"
     xst.write_text(json.dumps({"private": "PRIV", "public": "PUBKEY", "short_id": "ab12cd34", "sni": "www.example.com",
@@ -527,6 +533,20 @@ def main():
     body = e6.get(f"/d/{slot6}/conf?srv=evil").get_data(as_text=True)
     check("servers: неизвестный сервер игнорируется", "Endpoint = x:51820" in body)
     check("servers: без параметра файл как есть", "Endpoint = x:51820" in e6.get(f"/d/{slot6}/conf").get_data(as_text=True))
+    check("wireguard: отдельный список из четырёх вариантов",
+          [entry["key"] for entry in p6.WG_SERVERS] == ["fi1", "auto", "fi2", "ee1"]
+          and '<option value="auto" selected>' in html and "Авто, весь трафик IPv4" not in html)
+    for selected, host in (("auto", "wg.vpn.3dit.ru"), ("fi1", "fi-1-vpn.3dit.ru"),
+                           ("fi2", "fi-2-vpn.3dit.ru"), ("ee1", "ee-1-vpn.3dit.ru"),
+                           ("all", "wg.vpn.3dit.ru"), ("", "wg.vpn.3dit.ru")):
+        body = e6.get(f"/d/{slot6}/conf?format=wireguard&srv={selected}").get_data(as_text=True)
+        check(f"wireguard: весь трафик для {selected or 'default'}",
+              f"Endpoint = {host}:51822" in body
+              and re.findall(r"(?m)^AllowedIPs = (.*)$", body) == ["0.0.0.0/0, ::/0"]
+              and "1.2.3.0/24" not in body and f"PrivateKey = {b64key(slot6)}" in body
+              and f"PresharedKey = {b64key(slot6 + 50)}" in body)
+    os.environ.pop("PORTAL_WG_SERVERS")
+    os.environ.pop("PORTAL_WG_PUBLIC_KEY")
     # ---------- Xray (VLESS+Reality): ссылка для Happ, учёт трафика, генерация конфига
     import uuid as _uuid
     link = e6.get(f"/d/{slot6}/vless?srv=kz").get_data(as_text=True).strip()

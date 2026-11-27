@@ -24,8 +24,7 @@ if args.wireguard:
     with open("/etc/pm-vpn-cluster/portal-wg.key", "rb") as f:
         pub = subprocess.check_output(["wg", "pubkey"], stdin=f).decode().strip()
     plain = ("auto|wg.vpn.3dit.ru|Авто;fi1|fi-1-vpn.3dit.ru|Финляндия-1;"
-             "fi2|fi-2-vpn.3dit.ru|Финляндия-2;ee1|ee-1-vpn.3dit.ru|Эстония;"
-             "all|wg.vpn.3dit.ru|Авто, весь трафик IPv4|full")
+             "fi2|fi-2-vpn.3dit.ru|Финляндия-2;ee1|ee-1-vpn.3dit.ru|Эстония")
     lines += [f'PORTAL_WG_PUBLIC_KEY="{pub}"', f'PORTAL_WG_SERVERS="{plain}"']
 if args.estonia_amnezia:
     amnezia = ("auto|vpn.3dit.ru|Авто (рекомендуется);fi|fi-1-vpn.3dit.ru|Финляндия-1;"
