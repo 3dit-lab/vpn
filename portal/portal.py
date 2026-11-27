@@ -76,6 +76,10 @@ def parse_servers(raw):
 
 SERVERS = parse_servers(os.environ.get("PORTAL_SERVERS"))
 WG_SERVERS = parse_servers(os.environ.get("PORTAL_WG_SERVERS"))
+WG_AUTO = next((server for server in WG_SERVERS if server["key"] == "auto"), None)
+if WG_AUTO:
+    # Older deployments advertised the same WireGuard endpoint twice.
+    WG_SERVERS = [server for server in WG_SERVERS if server["key"] != "all" or server["host"] != WG_AUTO["host"]]
 WG_GATEWAYS = {}
 if WG_SERVERS or os.environ.get("PORTAL_WG_ENDPOINT"):
     from wireguard_profile import Gateway, client_address
@@ -83,7 +87,7 @@ if WG_SERVERS or os.environ.get("PORTAL_WG_ENDPOINT"):
     key, dns = os.environ["PORTAL_WG_PUBLIC_KEY"], os.environ.get("PORTAL_WG_DNS", "")
     if WG_SERVERS:
         port = int(os.environ.get("PORTAL_WG_PORT", "51822"))
-        WG_GATEWAYS = {s["key"]: Gateway(f"{s['host']}:{port}", key, dns, full=s["full"]) for s in WG_SERVERS}
+        WG_GATEWAYS = {s["key"]: Gateway(f"{s['host']}:{port}", key, dns) for s in WG_SERVERS}
     else:
         WG_GATEWAYS["default"] = Gateway(os.environ["PORTAL_WG_ENDPOINT"], key, dns)
 XRAY_STATE = Path(os.environ.get("XRAY_STATE", "/etc/vpn-xray.json"))
@@ -414,9 +418,10 @@ TEMPLATES = {
     <form method="get" action="/d/{{ d.slot }}/conf">
       <input type="hidden" name="format" value="wireguard">
       <label>Сервер WireGuard
-        <select name="srv">{% for sv in wireguard_servers %}<option value="{{ sv.key }}">{{ sv.title }}</option>{% endfor %}</select>
+        <select name="srv">{% for sv in wireguard_servers %}<option value="{{ sv.key }}"{% if sv.key == 'auto' %} selected{% endif %}>{{ sv.title }}</option>{% endfor %}</select>
       </label>
       <button class="btn secondary" type="submit">Скачать WireGuard</button>
+      <small>Весь трафик через VPN. «Авто» распределяет подключения между доступными серверами.</small>
     </form>
     {% endif %}
     {% if xray %}<button class="btn secondary copy" type="button" data-what="Ссылка скопирована. В Happ: «+» → «Вставить из буфера обмена»." data-url="/d/{{ d.slot }}/vless{% if servers %}?srv={{ servers[0].key }}{% endif %}">Ссылка для Happ</button>{% endif %}
@@ -1654,7 +1659,7 @@ def download(slot):
     suffix = ""
     if plain:
         try:
-            gateway = WG_GATEWAYS.get(request.args.get("srv")) or next(iter(WG_GATEWAYS.values()))
+            gateway = WG_GATEWAYS.get(request.args.get("srv")) or WG_GATEWAYS.get("auto") or next(iter(WG_GATEWAYS.values()))
             body = gateway.render(slot, body)
         except (ValueError, KeyError) as error:
             log.error("download: WireGuard slot %d could not be rendered (%s)", slot, type(error).__name__)
